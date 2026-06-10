@@ -1,0 +1,6 @@
+{
+  "name": "Sorveteria Supreme",
+  "description": "App de pedidos online e delivery para a Sorveteria Supreme. Curta sorvetes artesanais, combos, açaí personalizado e faça pedidos com pagamento PIX e cartão integrado.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

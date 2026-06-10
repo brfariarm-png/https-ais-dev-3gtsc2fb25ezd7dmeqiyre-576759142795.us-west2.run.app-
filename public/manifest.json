@@ -1,0 +1,24 @@
+{
+  "short_name": "Supreme",
+  "name": "Sorveteria Supreme",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#FDF2F8",
+  "theme_color": "#E11D48",
+  "display": "standalone",
+  "orientation": "portrait",
+  "description": "App de pedidos online e delivery para a Sorveteria Supreme de Sorocaba/SP. Faça seu açaí ou peça sorvetes artesanais com agilidade e rastreamento em tempo real."
+}
