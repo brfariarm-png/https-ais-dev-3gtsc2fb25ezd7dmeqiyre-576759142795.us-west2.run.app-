@@ -1,0 +1,182 @@
+{
+  "entities": {
+    "Order": {
+      "title": "Order",
+      "description": "An order placed by a customer in the Supreme Gourmet app.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The unique identifier of the order"
+        },
+        "total": {
+          "type": "number",
+          "description": "Total price of the order including delivery fees"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["waiting", "preparing", "delivering", "completed"],
+          "description": "Current tracking status of the order"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "The time when the order was placed"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The exact date-time when the order record was created"
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "Indicates if the order has been archived in a shift cashier closeout report"
+        }
+      },
+      "required": ["id", "total", "status", "timestamp", "createdAt"]
+    },
+    "Closeout": {
+      "title": "Closeout",
+      "description": "A cashier shift closing report.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the closeout record"
+        },
+        "closedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO timestamp when the shift was closed"
+        },
+        "closedBy": {
+          "type": "string",
+          "description": "Email address of the administrator who performed the closing"
+        },
+        "ordersCount": {
+          "type": "number",
+          "description": "Number of completed orders closed in this shift"
+        },
+        "totalSales": {
+          "type": "number",
+          "description": "Total sales volume of the shift"
+        },
+        "pixSales": {
+          "type": "number",
+          "description": "Subtotal of sales paid via PIX"
+        },
+        "cardSales": {
+          "type": "number",
+          "description": "Subtotal of sales paid via Credit/Debit card"
+        },
+        "cashSales": {
+          "type": "number",
+          "description": "Subtotal of sales paid via Cash"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional notes or observations recorded during closeout"
+        },
+        "orderIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of order IDs encompassed by this closeout"
+        }
+      },
+      "required": ["id", "closedAt", "closedBy", "ordersCount", "totalSales", "pixSales", "cardSales", "cashSales", "orderIds"]
+    },
+    "StoreSettings": {
+      "title": "StoreSettings",
+      "description": "Dynamic store configuration settings",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Dynamic store name"
+        },
+        "shortName": {
+          "type": "string",
+          "description": "Short form of the store name"
+        },
+        "city": {
+          "type": "string",
+          "description": "City where the branch is located"
+        },
+        "address": {
+          "type": "string",
+          "description": "Full address of the branch"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Contact phone number of the store"
+        },
+        "email": {
+          "type": "string",
+          "description": "Contact email address of the store"
+        },
+        "openTime": {
+          "type": "string",
+          "description": "Opening hour in HH:MM format"
+        },
+        "closeTime": {
+          "type": "string",
+          "description": "Closing hour in HH:MM format"
+        },
+        "statusOverride": {
+          "type": "string",
+          "enum": ["auto", "open", "closed"],
+          "description": "Override status for store availability"
+        },
+        "printerPaperWidth": {
+          "type": "string",
+          "enum": ["80mm", "58mm"],
+          "description": "Width of the thermal printer rolls"
+        },
+        "printerNumCopies": {
+          "type": "number",
+          "description": "Number of receipt copies printed"
+        },
+        "printerFontSize": {
+          "type": "number",
+          "description": "Font size on the receipt"
+        },
+        "printerFontType": {
+          "type": "string",
+          "enum": ["monospace", "sans-serif", "serif"],
+          "description": "Font style on the receipt"
+        },
+        "printerShowAddress": {
+          "type": "boolean",
+          "description": "Show store address on the receipt"
+        },
+        "printerHeaderMessage": {
+          "type": "string",
+          "description": "Header title of the printed receipt"
+        },
+        "printerFooterMessage": {
+          "type": "string",
+          "description": "Footer message of the printed receipt"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Datetime of last settings update"
+        }
+      },
+      "required": ["name", "shortName", "city", "address", "phone", "email", "openTime", "closeTime", "statusOverride", "printerPaperWidth", "printerNumCopies", "printerFontSize", "printerFontType", "printerShowAddress", "printerHeaderMessage", "printerFooterMessage", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "orders": {
+      "schema": "Order",
+      "description": "Collection of all gourmet acai and ice cream orders"
+    },
+    "settings": {
+      "schema": "StoreSettings",
+      "description": "Collection storing application and store configurations"
+    },
+    "closeouts": {
+      "schema": "Closeout",
+      "description": "Collection of all cashier closeout shift reports"
+    }
+  }
+}

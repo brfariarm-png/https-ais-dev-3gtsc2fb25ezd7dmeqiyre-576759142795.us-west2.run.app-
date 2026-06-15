@@ -1,0 +1,135 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Helper Primitives
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Include bootstrapped admin based on runtime email
+    function isVerifiedAdmin() {
+      return request.auth != null &&
+             request.auth.token != null &&
+             request.auth.token.email == 'brfariarm@gmail.com';
+    }
+
+    // 3. Validation Blueprints (Anti-Update-Gap)
+    function isValidOrder(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'total', 'status', 'timestamp', 'createdAt', 'items', 'details']) 
+          && (data.keys().size() == 8 || (data.keys().size() == 9 && data.keys().hasAll(['archived']) && data.archived is bool))
+          && data.id is string && data.id.size() <= 64
+          && data.ownerId is string && data.ownerId.size() <= 64
+          && data.total is number && data.total >= 0.0
+          && data.status is string && data.status in ['waiting', 'preparing', 'delivering', 'completed']
+          && data.timestamp is string && data.timestamp.size() <= 32
+          && data.createdAt == request.time
+          && data.items is list && data.items.size() > 0 && data.items.size() <= 100
+          && data.details is map;
+    }
+
+    function isValidCloseout(data) {
+      return data.keys().hasAll(['closedAt', 'closedBy', 'ordersCount', 'totalSales', 'pixSales', 'cardSales', 'cashSales', 'notes', 'orderIds'])
+          && data.keys().size() == 9
+          && data.closedAt is string && data.closedAt.size() <= 64
+          && data.closedBy is string && data.closedBy.size() <= 100
+          && data.ordersCount is number && data.ordersCount >= 0
+          && data.totalSales is number && data.totalSales >= 0.0
+          && data.pixSales is number && data.pixSales >= 0.0
+          && data.cardSales is number && data.cardSales >= 0.0
+          && data.cashSales is number && data.cashSales >= 0.0
+          && data.notes is string && data.notes.size() <= 500
+          && data.orderIds is list && data.orderIds.size() <= 1000;
+    }
+
+    function isValidStoreSettings(data) {
+      return data.keys().hasAll(['name', 'shortName', 'city', 'address', 'phone', 'email', 'openTime', 'closeTime', 'statusOverride', 'updatedAt', 'printerPaperWidth', 'printerNumCopies', 'printerFontSize', 'printerFontType', 'printerShowAddress', 'printerHeaderMessage', 'printerFooterMessage'])
+          && data.keys().size() == 17
+          && data.name is string && data.name.size() <= 100
+          && data.shortName is string && data.shortName.size() <= 50
+          && data.city is string && data.city.size() <= 50
+          && data.address is string && data.address.size() <= 250
+          && data.phone is string && data.phone.size() <= 30
+          && data.email is string && data.email.size() <= 100
+          && data.openTime is string && data.openTime.size() <= 10
+          && data.closeTime is string && data.closeTime.size() <= 10
+          && data.statusOverride is string && data.statusOverride in ['auto', 'open', 'closed']
+          && data.printerPaperWidth is string && data.printerPaperWidth in ['80mm', '58mm']
+          && data.printerNumCopies is number && data.printerNumCopies >= 1 && data.printerNumCopies <= 3
+          && data.printerFontSize is number && data.printerFontSize >= 10 && data.printerFontSize <= 14
+          && data.printerFontType is string && data.printerFontType in ['monospace', 'sans-serif', 'serif']
+          && data.printerShowAddress is bool
+          && data.printerHeaderMessage is string && data.printerHeaderMessage.size() <= 150
+          && data.printerFooterMessage is string && data.printerFooterMessage.size() <= 150
+          && data.updatedAt == request.time;
+    }
+
+    // 4. Access Rules matching blueprint paths
+    match /orders/{orderId} {
+      // Secure read operations: allow get (by ID) to anyone for instant status updates without authentication limits
+      allow get: if true;
+
+      // Allow list only to owners, verified admins, or guests retrieving their guest-prefixed orders
+      allow list: if request.auth != null && isVerifiedAdmin()
+                  || (request.auth != null && resource.data.ownerId == request.auth.uid)
+                  || (resource.data.ownerId.matches('^guest-.*'));
+
+      // Create rule using validation blueprint
+      allow create: if isValidId(orderId) 
+                    && isValidOrder(incoming());
+
+      // Update rule with action-based diffs and terminal state restrictions
+      allow update: if request.auth != null 
+                    && (
+                      isVerifiedAdmin()
+                      || (
+                        existing().status != 'completed'
+                        && (
+                          incoming().diff(existing()).affectedKeys().hasOnly(['status']) 
+                          && incoming().status in ['waiting', 'preparing', 'delivering', 'completed']
+                        )
+                      )
+                    );
+
+      // Delete completely forbidden for customers to protect transaction logs
+      allow delete: if request.auth != null && isVerifiedAdmin();
+    }
+
+    match /closeouts/{closeoutId} {
+      allow read: if request.auth != null && isVerifiedAdmin();
+      allow create: if request.auth != null && isVerifiedAdmin()
+                            && isValidId(closeoutId)
+                            && isValidCloseout(incoming());
+      allow update, delete: if false;
+    }
+
+    match /settings/{settingId} {
+      // Configuration settings are publicly readable to boot client app correctly
+      allow read: if true;
+
+      // Only authorized admins can change settings
+      allow create, update: if isVerifiedAdmin()
+                            && isValidId(settingId)
+                            && isValidStoreSettings(incoming());
+
+      allow delete: if isVerifiedAdmin();
+    }
+  }
+}

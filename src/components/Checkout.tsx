@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CreditCard, QrCode, ClipboardCheck, Clipboard, Compass, MapPin, Truck, Check, Wallet, RotateCcw, AlertCircle } from 'lucide-react';
+import { User } from 'firebase/auth';
 import { CheckoutDetails, PaymentType, CartItem } from '../types';
 
 interface CheckoutProps {
@@ -13,9 +14,12 @@ interface CheckoutProps {
   totalAmount: number;
   onPlaceOrder: (details: CheckoutDetails) => void;
   onClose: () => void;
+  storeAddress?: string;
+  currentUser?: User | null;
+  onSignIn?: () => Promise<void>;
 }
 
-export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose }: CheckoutProps) {
+export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose, storeAddress, currentUser, onSignIn }: CheckoutProps) {
   const [step, setStep] = useState<1 | 2>(1); // Step 1: Delivery info, Step 2: Payment
   const [deliveryType, setDeliveryType] = useState<'delivery' | 'pickup'>('delivery');
   const [customerName, setCustomerName] = useState('');
@@ -25,7 +29,7 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
   const [street, setStreet] = useState('');
   const [number, setNumber] = useState('');
   const [neighborhood, setNeighborhood] = useState('');
-  const [city, setCity] = useState('Sorocaba'); // default city
+  const [city, setCity] = useState('Monte Mor'); // default city
   const [reference, setReference] = useState('');
 
   // Payment info
@@ -43,6 +47,13 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
   // Form errors
   const [errors, setErrors] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Autofill name from Firebase User
+  useEffect(() => {
+    if (currentUser && !customerName) {
+      setCustomerName(currentUser.displayName || '');
+    }
+  }, [currentUser]);
 
   // Countdown timer for Pix
   useEffect(() => {
@@ -159,7 +170,7 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
   };
 
   // Pix code generator mock
-  const pixMockCode = `00020126580014br.gov.bcb.pix0136supremeicecream-pix-key-99881273918205204000053039865407${finalTotal.toFixed(2)}5802BR5918Sorveteria_Supreme6008Sorocaba62070503***6304D792`;
+  const pixMockCode = `00020126580014br.gov.bcb.pix0136supremeicecream-pix-key-99881273918205204000053039865407${finalTotal.toFixed(2)}5802BR5918Sorveteria_Supreme6009Monte_Mor62070503***6304D792`;
 
   const copyPixToClipboard = () => {
     navigator.clipboard.writeText(pixMockCode);
@@ -245,6 +256,30 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
                 </button>
               </div>
 
+              {/* Firebase Authentication sync info banner */}
+              <div className="mt-2.5">
+                {currentUser !== undefined && !currentUser ? (
+                  <div className="bg-amber-50 border border-amber-200/50 p-4 rounded-2xl text-[11px] text-amber-800 leading-relaxed font-semibold flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <div className="flex flex-col gap-1 flex-1">
+                      <span>Dica: Ative seu SUPREME ID com a conta Google para salvar este pedido na nuvem e rastrear a entrega em tempo real de qualquer celular!</span>
+                      <span className="text-[10px] text-amber-700/80 font-bold block">(Opcional: se o login for bloqueado no seu celular, basta preencher os dados abaixo para pedir como Visitante!)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onSignIn}
+                      className="flex-shrink-0 bg-amber-500 hover:bg-amber-600 text-amber-950 px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all shadow-xs cursor-pointer"
+                    >
+                      Ativar SUPREME ID
+                    </button>
+                  </div>
+                ) : currentUser ? (
+                  <div className="bg-emerald-50 border border-emerald-100 p-3.5 rounded-2xl text-[11px] text-emerald-800 leading-normal font-semibold flex items-center gap-2.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Conectado via <strong className="font-extrabold">SUPREME ID</strong> ({currentUser.displayName || currentUser.email}). Seu pedido será sincronizado e guardado no Firebase de forma totalmente segura.</span>
+                  </div>
+                ) : null}
+              </div>
+
               {/* Personal info fields */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                 <div>
@@ -320,7 +355,7 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
                         type="text"
                         value={city}
                         onChange={(e) => setCity(e.target.value)}
-                        placeholder="Ex: Sorocaba"
+                        placeholder="Ex: Monte Mor"
                         className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-neutral-100 text-slate-500 font-medium cursor-not-allowed"
                         disabled
                       />
@@ -344,7 +379,7 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
                   <h4 className="text-xs font-extrabold text-amber-800">Retirada na Loja Express</h4>
                   <p className="text-[11px] text-amber-700/85 max-w-md mx-auto leading-normal font-medium">
                     Você economiza a taxa de entrega! Nosso endereço é: <br />
-                    <span className="font-bold text-amber-900 shadow-sm">Av. General Carneiro, 1205 - Vila Lucy - Sorocaba/SP</span>. <br />
+                    <span className="font-bold text-amber-900 shadow-sm">{storeAddress || "Av. General Carneiro, 1205 - Vila Lucy - Monte Mor/SP"}</span>. <br />
                     Seu pedido estará pronto para retirada em cerca de <span className="font-bold">15-20 minutos</span> após a confirmação.
                   </p>
                 </div>

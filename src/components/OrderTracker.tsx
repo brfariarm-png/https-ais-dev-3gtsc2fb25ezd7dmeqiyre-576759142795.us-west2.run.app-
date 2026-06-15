@@ -7,14 +7,16 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { ChefHat, Bike, Clock, CheckCircle2, AlertCircle, RefreshCw, Star, ArrowRight, Heart } from 'lucide-react';
 import { Order, OrderStatus } from '../types';
+import { FLAVOR_OPTIONS, TOPPING_OPTIONS } from '../data';
 
 interface OrderTrackerProps {
   order: Order;
   onClose: () => void;
   onSimulateStatusProgress?: () => void; // Allow manual simulation for review
+  storeSettings?: any;
 }
 
-export default function OrderTracker({ order, onClose, onSimulateStatusProgress }: OrderTrackerProps) {
+export default function OrderTracker({ order, onClose, onSimulateStatusProgress, storeSettings }: OrderTrackerProps) {
   const [currentStatus, setCurrentStatus] = useState<OrderStatus>(order.status);
   const [rating, setRating] = useState(0);
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
@@ -35,7 +37,7 @@ export default function OrderTracker({ order, onClose, onSimulateStatusProgress 
     {
       key: 'preparing',
       label: 'Preparando',
-      desc: 'Os gelatos estão sendo servidos e decorados com carinho.',
+      desc: 'Os sorvetes e açaís estão sendo servidos e decorados com carinho.',
       icon: ChefHat,
       color: 'bg-indigo-500',
     },
@@ -94,6 +96,7 @@ export default function OrderTracker({ order, onClose, onSimulateStatusProgress 
           </div>
         </div>
       </div>
+
 
       {/* Simulated status control bar for reviewer */}
       {onSimulateStatusProgress && currentStatus !== 'completed' && (
@@ -198,7 +201,7 @@ export default function OrderTracker({ order, onClose, onSimulateStatusProgress 
           <div>
             <h4 className="text-sm font-bold text-slate-800">Seu pedido foi entregue com Sucesso!</h4>
             <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-              Espero que sua taça de gelato ou açaí esteja incrivelmente gelada e cremosa. Sua opinião vale muito para a Sorveteria Supreme!
+              Espero que sua taça de sorvete ou açaí esteja incrivelmente gelada e cremosa. Sua opinião vale muito para a Sorveteria Supreme!
             </p>
           </div>
 
@@ -248,13 +251,56 @@ export default function OrderTracker({ order, onClose, onSimulateStatusProgress 
         <h4 className="text-xs font-bold text-slate-600 border-b border-rose-50 pb-1.5 uppercase tracking-wide">Resumo dos Produtos</h4>
         <div className="space-y-2 max-h-[140px] overflow-y-auto pr-1">
           {order.items.map((item) => (
-            <div key={item.id} className="flex justify-between items-center text-xs">
-              <div className="min-w-0 pr-2">
-                <span className="font-extrabold text-rose-600 mr-1.5">{item.quantity}x</span>
-                <span className="font-bold text-slate-700">{item.menuItem.name}</span>
-                {item.notes && (
-                  <p className="text-[10px] text-slate-400 italic">Obs: {item.notes}</p>
+            <div key={item.id} className="flex justify-between items-start text-xs border-b border-slate-50 pb-2 last:border-b-0 last:pb-0">
+              <div className="min-w-0 pr-2 flex-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-extrabold text-rose-600">{item.quantity}x</span>
+                  <span className="font-bold text-slate-700">{item.menuItem.name}</span>
+                </div>
+                {item.isCustomCup && item.customCupConfig && (
+                  <div className="text-[10px] text-indigo-650 font-semibold leading-normal mt-0.5 space-y-0.5 pl-4">
+                    <p>🥣 Base: {item.customCupConfig.base === 'acai' ? 'Açaí' : item.customCupConfig.base === 'sorvete' ? 'Sorvete' : 'Casadinho'} | Tamanho: {item.customCupConfig.size}</p>
+                    {item.customCupConfig.flavors && item.customCupConfig.flavors.length > 0 && (
+                      <p className="text-slate-400 font-medium font-mono text-[9px]">• Sabores: {item.customCupConfig.flavors.map(fid => FLAVOR_OPTIONS.find(f => f.id === fid)?.name || fid).join(', ')}</p>
+                    )}
+                    {item.customCupConfig.toppings && item.customCupConfig.toppings.length > 0 && (
+                      <p className="text-slate-400 font-medium font-mono text-[9px]">• Adicionais: {item.customCupConfig.toppings.map(tid => TOPPING_OPTIONS.find(t => t.id === tid)?.name || tid).join(', ')}</p>
+                    )}
+                  </div>
                 )}
+                {item.notes && (() => {
+                  const lower = item.notes.toLowerCase();
+                  const isRetire = lower.includes('retir') || lower.includes('tirar') || lower.includes('sem ') || lower.includes('tire');
+                  const isSeparado = lower.includes('separad') || lower.includes('mande separ') || lower.includes('pote') || lower.includes('potinho') || lower.includes('mandar separ');
+                  
+                  if (isRetire && isSeparado) {
+                    return (
+                      <div className="mt-1 bg-red-50 border border-red-250 text-red-700 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wide flex items-center gap-1">
+                        <span>⚠️ RETIRAR & SEPARAR:</span>
+                        <span className="font-bold text-slate-700 normal-case">"{item.notes}"</span>
+                      </div>
+                    );
+                  }
+                  if (isRetire) {
+                    return (
+                      <div className="mt-1 bg-amber-50 border border-amber-250 text-amber-800 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wide flex items-center gap-1">
+                        <span>🚫 RETIRAR:</span>
+                        <span className="font-bold text-slate-755 normal-case">"{item.notes}"</span>
+                      </div>
+                    );
+                  }
+                  if (isSeparado) {
+                    return (
+                      <div className="mt-1 bg-cyan-50 border border-cyan-255 text-cyan-850 px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-wide flex items-center gap-1">
+                        <span>📦 MANDAR SEPARADO:</span>
+                        <span className="font-bold text-slate-755 normal-case">"{item.notes}"</span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <p className="text-[10px] text-slate-400 italic">Obs: {item.notes}</p>
+                  );
+                })()}
               </div>
               <span className="font-mono text-slate-600 font-semibold flex-shrink-0">
                 R$ {((item.customCupPrice || item.menuItem.price) * item.quantity).toFixed(2)}

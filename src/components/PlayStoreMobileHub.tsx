@@ -34,8 +34,17 @@ export default function PlayStoreMobileHub() {
     }
   };
 
+  const getPublicShareUrl = () => {
+    const currentUrl = window.location.href;
+    if (currentUrl.includes('ais-dev-')) {
+      return currentUrl.replace('ais-dev-', 'ais-pre-');
+    }
+    return currentUrl;
+  };
+
   const copyAppUrl = () => {
-    navigator.clipboard.writeText(window.location.href);
+    const publicUrl = getPublicShareUrl();
+    navigator.clipboard.writeText(publicUrl);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 3000);
   };
@@ -54,6 +63,59 @@ export default function PlayStoreMobileHub() {
           <p className="text-xs md:text-sm text-indigo-100/90 leading-relaxed mt-2">
             Este app foi desenvolvido sob as diretrizes de uma <strong>PWA (Progressive Web App)</strong> premium. Isso significa que ele se comporta exatamente como um aplicativo nativo e pode ser empacotado para distribuição oficial na Google Play Store e App Store com extrema facilidade.
           </p>
+        </div>
+      </div>
+
+      {/* SEÇÃO QR CODE E LINK PÚBLICO (Dispositivo Móvel / Outro Aparelho) */}
+      <div className="bg-amber-50/60 border border-amber-200/60 rounded-3xl p-6 flex flex-col md:flex-row items-center gap-6 shadow-sm">
+        <div className="bg-white p-3 rounded-2xl border border-amber-100 shadow-sm flex-shrink-0 flex flex-col items-center gap-1.5">
+          <img 
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(getPublicShareUrl())}`} 
+            alt="QR Code do App Público" 
+            className="w-36 h-36"
+            referrerPolicy="no-referrer"
+          />
+          <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">URL Pública</span>
+        </div>
+        <div className="flex-1 space-y-3.5 text-center md:text-left">
+          <span className="bg-rose-500 text-white font-black text-[9px] tracking-wider px-2.5 py-1 rounded-full uppercase select-none">
+            Passo Obrigatório para Funcionar! ⚠️
+          </span>
+          <h3 className="text-base font-black text-slate-800 leading-snug">
+            Por que diz "Conectando..." ou dá erro ao abrir em outro aparelho?
+          </h3>
+          
+          <div className="space-y-2 text-xs text-slate-600 leading-relaxed font-semibold">
+            <p>
+              Por segurança e privacidade padrão do Google, todas as conexões externas de outros aparelhos (celulares, tablets, etc) são <strong>bloqueadas</strong> até que você autorize o compartilhamento público!
+            </p>
+            <div className="bg-white/85 p-3.5 rounded-2xl border border-amber-250/70 space-y-1.5 text-slate-700">
+              <span className="text-[10px] text-amber-600 font-extrabold uppercase tracking-wider block">Siga estes 3 passos simples para liberar:</span>
+              <ul className="list-decimal pl-4 space-y-1 text-left text-[11px]">
+                <li>No seu computador, no menu do topo do <strong>Google AI Studio</strong>, clique no botão <strong className="text-rose-600">"Compartilhar" (Share)</strong>.</li>
+                <li>Clique para gerar/ativar o link público de testes do aplicativo.</li>
+                <li>Pronto! Agora sim, qualquer celular que escanear este QR code ou acessar o link <strong className="text-rose-600">ais-pre-...</strong> conseguirá abrir o seu app de sorveteria na hora!</li>
+              </ul>
+            </div>
+          </div>
+
+          <div className="pt-1 select-all font-mono text-[11px] text-rose-600 bg-white border border-slate-100 p-2.5 rounded-xl break-all font-bold">
+            {getPublicShareUrl()}
+          </div>
+          <button
+            onClick={copyAppUrl}
+            className="w-full md:w-auto bg-amber-500 hover:bg-amber-600 active:scale-98 text-slate-950 font-black text-[10px] tracking-widest uppercase px-5 py-3 rounded-xl transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            {copiedLink ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-slate-900" /> Link do aplicativo copiado!
+              </>
+            ) : (
+              <>
+                <Copy className="w-3.5 h-3.5 text-slate-900" /> Copiar Link Público de Testes
+              </>
+            )}
+          </button>
         </div>
       </div>
 

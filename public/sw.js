@@ -34,7 +34,11 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // Simple network-first fallback to cache strategy to guarantee offline capabilities
+  // Only intercept HTTP/HTTPS GET requests to prevent crashes from browser extensions, non-GET or data scheme URLs
+  if (!e.request.url.startsWith('http') || e.request.method !== 'GET') {
+    return;
+  }
+
   e.respondWith(
     fetch(e.request)
       .catch(() => {
