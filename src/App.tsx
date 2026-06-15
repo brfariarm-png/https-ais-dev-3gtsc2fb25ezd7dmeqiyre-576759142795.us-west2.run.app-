@@ -345,7 +345,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'menu' | 'tracker'>('menu');
   const [isPrinterConfigOpen, setIsPrinterConfigOpen] = useState(false);
   const [isSoundEnabled, setIsSoundEnabled] = useState(true);
-  const [adminSubTab, setAdminSubTab] = useState<'orders' | 'pdv' | 'fechamento' | 'impressora' | 'cardapio'>('orders');
+  const [adminSubTab, setAdminSubTab] = useState<'orders' | 'pdv' | 'fechamento' | 'impressora' | 'cardapio' | 'playstore'>('orders');
   const [isRingingLoop, setIsRingingLoop] = useState(false);
   const [visualNotifications, setVisualNotifications] = useState<VisualNotification[]>([]);
   const [autoPrintOnNew, setAutoPrintOnNew] = useState(() => {
@@ -1957,6 +1957,16 @@ export default function App() {
                         >
                           🥣 Cardápio
                         </button>
+                        <button
+                          onClick={() => setAdminSubTab('playstore')}
+                          className={`flex-1 min-w-[120px] flex items-center justify-center gap-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                            adminSubTab === 'playstore'
+                              ? 'bg-white text-rose-650 shadow-sm'
+                              : 'text-slate-500 hover:text-slate-850'
+                          }`}
+                        >
+                          📱 Play Store
+                        </button>
                       </div>
 
                     {/* Conditional rendering for PDV versus Normal Desktop workflow */}
@@ -1985,6 +1995,8 @@ export default function App() {
                       />
                     ) : adminSubTab === 'cardapio' ? (
                       <AdminCardapio menuItems={menuItems} />
+                    ) : adminSubTab === 'playstore' ? (
+                      <PlayStoreMobileHub />
                     ) : (
                       <div className="space-y-6">
 
