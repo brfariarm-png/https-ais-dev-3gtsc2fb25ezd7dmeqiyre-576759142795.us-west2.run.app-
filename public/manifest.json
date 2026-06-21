@@ -1,5 +1,8 @@
 {
-  "id": "/?source=pwa",
+  "id": "/",
+  "scope": "/",
+  "lang": "pt-BR",
+  "categories": ["food", "shopping"],
   "short_name": "Supreme",
   "name": "Sorveteria Supreme",
   "icons": [
