@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Download, Star, ShieldCheck, Laptop, Smartphone, Tablet, ExternalLink, HelpCircle, AlertCircle, Copy, Check } from 'lucide-react';
+import SupremeLogo from './SupremeLogo';
 
 export default function PlayStoreMobileHub() {
   const [devicePreview, setDevicePreview] = useState<'ios' | 'android'>('android');
@@ -130,10 +131,8 @@ export default function PlayStoreMobileHub() {
 
         <div className="bg-white border border-slate-100 rounded-2xl p-5 flex flex-col md:flex-row gap-5 items-start">
           {/* Mock app icon */}
-          <div className="w-20 h-20 bg-gradient-to-br from-rose-400 to-indigo-600 rounded-2xl shadow-md p-0.5 flex-shrink-0 flex items-center justify-center text-white">
-            <div className="bg-indigo-950 w-full h-full rounded-[14px] flex items-center justify-center font-black text-2xl tracking-tighter">
-              S<span className="text-rose-500">S</span>
-            </div>
+          <div className="w-20 h-20 flex-shrink-0 flex items-center justify-center filter drop-shadow-md select-none">
+            <SupremeLogo size={76} className="w-full h-full animate-[pulse_6s_infinite]" />
           </div>
 
           <div className="flex-1 space-y-2">

@@ -163,6 +163,52 @@
         }
       },
       "required": ["name", "shortName", "city", "address", "phone", "email", "openTime", "closeTime", "statusOverride", "printerPaperWidth", "printerNumCopies", "printerFontSize", "printerFontType", "printerShowAddress", "printerHeaderMessage", "printerFooterMessage", "updatedAt"]
+    },
+    "MenuItem": {
+      "title": "MenuItem",
+      "description": "An item in the ice cream and acai store menu.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the food option"
+        },
+        "description": {
+          "type": "string",
+          "description": "Short description of the item list"
+        },
+        "price": {
+          "type": "number",
+          "description": "Selling price of the menu item"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["acai", "sorvete", "milkshake", "sundae", "combo"],
+          "description": "Category group"
+        },
+        "image": {
+          "type": "string",
+          "description": "URL or local asset reference path"
+        },
+        "popular": {
+          "type": "boolean",
+          "description": "Whether highlighted in popular section"
+        },
+        "customizable": {
+          "type": "boolean",
+          "description": "If flavors/toppings selection is available"
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tags of flags"
+        },
+        "index": {
+          "type": "number",
+          "description": "Sort order ranking"
+        }
+      },
+      "required": ["name", "description", "price", "category", "image"]
     }
   },
   "firestore": {
@@ -177,6 +223,10 @@
     "closeouts": {
       "schema": "Closeout",
       "description": "Collection of all cashier closeout shift reports"
+    },
+    "menu_items": {
+      "schema": "MenuItem",
+      "description": "All available ice cream, acai and gourmet options listed on the store's cardapio"
     }
   }
 }

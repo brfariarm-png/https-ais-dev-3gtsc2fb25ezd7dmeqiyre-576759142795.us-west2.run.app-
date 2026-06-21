@@ -150,5 +150,6 @@ export const STORE_CONFIG = {
   address: "Rua Chequer Assis, 195 - ao lado do extra supermercado - Monte Mor/SP",
   phone: "(19) 97411-8672",
   email: "contato@sorveteriasupreme.com.br",
-  instagram: "@sorveteriagourmetsupreme"
+  instagram: "@sorveteria.supreme",
+  customDomain: "sorveteriasupreme.vercel.app"
 };

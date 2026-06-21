@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CreditCard, QrCode, ClipboardCheck, Clipboard, Compass, MapPin, Truck, Check, Wallet, RotateCcw, AlertCircle } from 'lucide-react';
 import { User } from 'firebase/auth';
@@ -17,23 +17,262 @@ interface CheckoutProps {
   storeAddress?: string;
   currentUser?: User | null;
   onSignIn?: () => Promise<void>;
+  deliveryFees?: { 
+    neighborhood: string; 
+    fee: number; 
+    exactCep?: string; 
+    cepStart?: string; 
+    cepEnd?: string; 
+  }[];
+  storePhone?: string;
+  storeSettings?: any;
 }
 
-export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose, storeAddress, currentUser, onSignIn }: CheckoutProps) {
+// CRC16-CCITT implementation for authentic Brazilian PIX QR/Copia e Cola codes
+function calcCRC16(str: string): string {
+  let crc = 0xFFFF;
+  for (let i = 0; i < str.length; i++) {
+    let charCode = str.charCodeAt(i);
+    crc ^= (charCode << 8);
+    for (let j = 0; j < 8; j++) {
+      if ((crc & 0x8000) !== 0) {
+        crc = (crc << 1) ^ 0x1021;
+      } else {
+        crc = (crc << 1);
+      }
+    }
+  }
+  let hex = (crc & 0xFFFF).toString(16).toUpperCase();
+  return hex.padStart(4, '0');
+}
+
+// Generate dynamic static BR Code Pix payload based on customized store credentials
+function generatePixPayload(key: string, name: string, city: string, amount: number): string {
+  const cleanKey = key.replace(/\s+/g, '');
+  const cleanName = name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9 ]/g, "")
+    .substring(0, 25)
+    .trim();
+  const cleanCity = city
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9 ]/g, "")
+    .substring(0, 15)
+    .trim();
+  const formattedAmount = amount.toFixed(2);
+
+  const gui = "0014br.gov.bcb.pix";
+  const keyField = "01" + cleanKey.length.toString().padStart(2, '0') + cleanKey;
+  const merchantAccountInfo = gui + keyField;
+  
+  let payload = "000201"; 
+  payload += "26" + merchantAccountInfo.length.toString().padStart(2, '0') + merchantAccountInfo;
+  payload += "52040000"; 
+  payload += "5303986"; 
+  payload += "54" + formattedAmount.length.toString().padStart(2, '0') + formattedAmount; 
+  payload += "5802BR"; 
+  payload += "59" + cleanName.length.toString().padStart(2, '0') + cleanName; 
+  payload += "60" + cleanCity.length.toString().padStart(2, '0') + cleanCity; 
+  payload += "62070503***"; 
+  payload += "6304"; 
+
+  const crc = calcCRC16(payload);
+  return payload + crc;
+}
+
+export default function Checkout({ 
+  cartItems, 
+  totalAmount, 
+  onPlaceOrder, 
+  onClose, 
+  storeAddress, 
+  currentUser, 
+  onSignIn, 
+  deliveryFees, 
+  storePhone,
+  storeSettings
+}: CheckoutProps) {
   const [step, setStep] = useState<1 | 2>(1); // Step 1: Delivery info, Step 2: Payment
   const [deliveryType, setDeliveryType] = useState<'delivery' | 'pickup'>('delivery');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [sendToWhatsApp, setSendToWhatsApp] = useState(true);
   
   // Address info
+  const [cep, setCep] = useState('');
+  const [loadingCep, setLoadingCep] = useState(false);
+  const [cepError, setCepError] = useState('');
+  const [cepDiagnostic, setCepDiagnostic] = useState<string[]>([]);
+
+  const formatCep = (value: string) => {
+    const raw = value.replace(/\D/g, '').slice(0, 8);
+    if (raw.length > 5) {
+      return `${raw.slice(0, 5)}-${raw.slice(5)}`;
+    }
+    return raw;
+  };
+
+  const lookupCep = async (cepValue: string) => {
+    const cleanCep = cepValue.replace(/\D/g, '');
+    if (cleanCep.length !== 8) {
+      setCepError('CEP deve conter 8 dígitos.');
+      return;
+    }
+
+    setLoadingCep(true);
+    setCepError('');
+    setCepDiagnostic([]);
+    const diag: string[] = [];
+    diag.push(`👉 Iniciando busca pelo CEP ${cepValue} (Limpo: ${cleanCep})`);
+
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+      if (!response.ok) throw new Error('Falha ao buscar CEP.');
+      const data = await response.json();
+      
+      if (data.erro) {
+        setCepError('CEP não cadastrado nos Correios.');
+        diag.push(`❌ CEP inválido ou não encontrado nos Correios.`);
+        setCepDiagnostic(diag);
+        return;
+      }
+
+      setStreet(data.logradouro || '');
+      if (data.localidade) {
+        setCity(data.localidade);
+      }
+      
+      diag.push(`✅ Correios retornou: Rua: "${data.logradouro || ''}", Bairro: "${data.bairro || ''}", Cidade: "${data.localidade || ''}"`);
+
+      const foundBairro = (data.bairro || '').trim();
+      if (foundBairro) {
+        diag.push(`Bairro identificado: "${foundBairro}"`);
+      } else {
+        diag.push(`Aviso: Logradouro de Correios não retornou bairro direto.`);
+      }
+
+      if (deliveryFees && deliveryFees.length > 0) {
+        diag.push(`Avaliando as ${deliveryFees.length} regras de entrega cadastradas no painel...`);
+        
+        // Check for a CEP-based delivery fee match first (exact or range)
+        let matchedCepFee = deliveryFees.find(df => {
+          if (!df.exactCep) return false;
+          const exactClean = df.exactCep.replace(/\D/g, '');
+          const isMatch = exactClean === cleanCep;
+          diag.push(`🔍 CEP Exato: DB "${df.exactCep}" (${exactClean}) VS digitado "${cleanCep}" -> ${isMatch ? '✅ MATCH!' : '❌ Diferente'}`);
+          return isMatch;
+        });
+
+        if (!matchedCepFee) {
+          diag.push(`CEP exato não correspondido. Verificando faixas/blocos de CEP...`);
+          matchedCepFee = deliveryFees.find(df => {
+            const startStr = (df.cepStart || '').replace(/\D/g, '').padEnd(8, '0');
+            const endStr = (df.cepEnd || '').replace(/\D/g, '').padEnd(8, '9');
+            if (!startStr || !endStr || startStr.length < 5 || endStr.length < 5) return false;
+
+            const clientNum = parseInt(cleanCep, 10);
+            const startNum = parseInt(startStr, 10);
+            const endNum = parseInt(endStr, 10);
+
+            const isMatch = !isNaN(clientNum) && !isNaN(startNum) && !isNaN(endNum) && clientNum >= startNum && clientNum <= endNum;
+            diag.push(`🔍 Bloco CEP Bairro "${df.neighborhood}": DB [${df.cepStart} (${startStr}) até ${df.cepEnd} (${endStr})] VS digitado "${cleanCep}" -> ${isMatch ? '✅ MATCH!' : '❌ Fora'}`);
+            return isMatch;
+          });
+        }
+
+        if (matchedCepFee) {
+          diag.push(`🎉 Sucesso! Regra de CEP correspondida. Bairro: "${matchedCepFee.neighborhood}" (Taxa: R$ ${matchedCepFee.fee.toFixed(2)})`);
+          setNeighborhood(matchedCepFee.neighborhood);
+        } else if (foundBairro) {
+          diag.push(`Nenhuma regra de CEP exato ou faixa foi correspondida. Verificando regras baseadas no nome do Bairro...`);
+          const matched = deliveryFees.find(
+            (df) => {
+              const isMatch = df.neighborhood.trim().toLowerCase() === foundBairro.toLowerCase();
+              diag.push(`🔍 Nome do Bairro: DB "${df.neighborhood}" VS Correios "${foundBairro}" -> ${isMatch ? '✅ MATCH!' : '❌ Diferente'}`);
+              return isMatch;
+            }
+          );
+          if (matched) {
+            diag.push(`🎉 Encontrado por Nome de Bairro exato! Bairro: "${matched.neighborhood}" (Taxa: R$ ${matched.fee.toFixed(2)})`);
+            setNeighborhood(matched.neighborhood);
+          } else {
+            diag.push(`Bairro exato não encontrado. Tentando aproximação parcial do nome...`);
+            const partialMatched = deliveryFees.find(
+              (df) => {
+                const dbBairro = df.neighborhood.trim().toLowerCase();
+                const findBairro = foundBairro.toLowerCase();
+                const isMatch = findBairro.includes(dbBairro) || dbBairro.includes(findBairro);
+                diag.push(`   Aproximação: DB "${df.neighborhood}" VS Correios "${foundBairro}" -> ${isMatch ? '✅ MATCH!' : '❌ Diferente'}`);
+                return isMatch;
+              }
+            );
+            if (partialMatched) {
+              diag.push(`🎉 Encontrado por aproximação de Bairro! Bairro: "${partialMatched.neighborhood}" (Taxa: R$ ${partialMatched.fee.toFixed(2)})`);
+              setNeighborhood(partialMatched.neighborhood);
+            } else {
+              diag.push(`❌ Nenhum mapeamento de CEP ou Bairro correspondido.`);
+              setNeighborhood('');
+              setCepError(`Bairro ${foundBairro} não cadastrado nas taxas de entrega. Selecione abaixo.`);
+            }
+          }
+        } else {
+          diag.push(`❌ CEP Geral/Único verificado de cidade com CEP Único e nenhuma regra de CEP exato/bloco correspondente.`);
+          setNeighborhood('');
+          setCepError(`Nenhuma taxa de entrega correspondente ao CEP digitado. Por favor, selecione a região correta no campo Bairro abaixo.`);
+        }
+      } else {
+        diag.push(`Aviso: Nenhuma regra de entrega cadastrada. Adicionando o bairro direto.`);
+        setNeighborhood(foundBairro || 'Centro');
+      }
+    } catch (err) {
+      console.error(err);
+      setCepError('Erro ao carregar endereço. Preencha manualmente.');
+      diag.push(`💥 Erro crítico: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setLoadingCep(false);
+      setCepDiagnostic(diag);
+      console.log("=== DIAGNÓSTICO DE CEP ===", diag.join("\n"));
+    }
+  };
+
+  const handleCepChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const formatted = formatCep(e.target.value);
+    setCep(formatted);
+    setCepError('');
+    if (formatted.replace(/\D/g, '').length === 8) {
+      lookupCep(formatted);
+    }
+  };
+
   const [street, setStreet] = useState('');
   const [number, setNumber] = useState('');
   const [neighborhood, setNeighborhood] = useState('');
-  const [city, setCity] = useState('Monte Mor'); // default city
+  const [city, setCity] = useState(storeSettings?.city || 'Monte Mor'); // default city
   const [reference, setReference] = useState('');
+
+  // Payment filtering based on storeSettings toggles
+  const paymentMethods = useMemo(() => {
+    return [
+      { id: 'pix', label: 'Pix Online', enabled: storeSettings?.paymentPixEnabled !== false },
+      { id: 'card', label: 'Cartão de Crédito', enabled: storeSettings?.paymentCardEnabled !== false },
+      { id: 'cash_on_delivery', label: 'Dinheiro na Entrega', enabled: storeSettings?.paymentCashDeliveryEnabled !== false },
+      { id: 'card_on_delivery', label: 'Cartão na Entrega', enabled: storeSettings?.paymentCardDeliveryEnabled !== false },
+    ].filter(m => m.enabled);
+  }, [storeSettings]);
 
   // Payment info
   const [paymentType, setPaymentType] = useState<PaymentType>('pix');
+  const [cashChange, setCashChange] = useState('');
+
+  // Fallback to first available payment method if previous is disabled
+  useEffect(() => {
+    if (paymentMethods.length > 0 && !paymentMethods.find(m => m.id === paymentType)) {
+      setPaymentType(paymentMethods[0].id as PaymentType);
+    }
+  }, [paymentMethods, paymentType]);
+
   const [copiedPix, setCopiedPix] = useState(false);
   const [pixTimeLeft, setPixTimeLeft] = useState(600); // 10 minutes countdown
 
@@ -66,8 +305,110 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
     return () => clearInterval(timer);
   }, [paymentType, step]);
 
-  const deliveryFee = deliveryType === 'delivery' ? 5.00 : 0.00;
+  const selectedNeighborhoodObj = useMemo(() => {
+    if (!deliveryFees) {
+      console.log("⚠️ [Fee Calculator] Nenhuma taxa de entrega configurada.");
+      return undefined;
+    }
+    const cleanCep = cep ? cep.replace(/\D/g, '') : '';
+    console.log(`📊 [Fee Calculator] Calculando taxa de entrega. CEP: "${cleanCep}" (limpo), Bairro: "${neighborhood}"`);
+    
+    if (cleanCep && cleanCep.length === 8) {
+      // 1. Match exact CEP
+      const exactMatch = deliveryFees.find(df => {
+        if (!df.exactCep) return false;
+        const exactClean = df.exactCep.replace(/\D/g, '');
+        const isMatch = exactClean === cleanCep;
+        console.log(`   - Comparando CEP Exato: DB "${df.exactCep}" (${exactClean}) VS CEP "${cleanCep}" -> ${isMatch ? '✅ MATCH' : '❌ Diferente'}`);
+        return isMatch;
+      });
+      if (exactMatch) {
+        console.log(`🎉 [Fee Calculator] Coincidência de CEP Exato encontrada para o bairro "${exactMatch.neighborhood}" com taxa de R$ ${exactMatch.fee}`);
+        return exactMatch;
+      }
+
+      // 2. Match CEP range
+      const rangeMatch = deliveryFees.find(df => {
+        const startStr = (df.cepStart || '').replace(/\D/g, '').padEnd(8, '0');
+        const endStr = (df.cepEnd || '').replace(/\D/g, '').padEnd(8, '9');
+        if (!startStr || !endStr || startStr.length < 5 || endStr.length < 5) return false;
+
+        const clientNum = parseInt(cleanCep, 10);
+        const startNum = parseInt(startStr, 10);
+        const endNum = parseInt(endStr, 10);
+
+        const isMatch = !isNaN(clientNum) && !isNaN(startNum) && !isNaN(endNum) && clientNum >= startNum && clientNum <= endNum;
+        console.log(`   - Comparando Bloco CEP Bairro "${df.neighborhood}": DB [${df.cepStart} (${startStr}) até ${df.cepEnd} (${endStr})] VS CEP "${cleanCep}" -> ${isMatch ? '✅ MATCH' : '❌ Fora da faixa'}`);
+        return isMatch;
+      });
+      if (rangeMatch) {
+        console.log(`🎉 [Fee Calculator] Coincidência de Bloco CEP encontrada para o bairro "${rangeMatch.neighborhood}" com taxa de R$ ${rangeMatch.fee}`);
+        return rangeMatch;
+      }
+    }
+
+    // 3. Match neighborhood
+    const neighborhoodMatch = deliveryFees.find(
+      (item) => {
+        const isMatch = item.neighborhood.trim().toLowerCase() === neighborhood.trim().toLowerCase();
+        console.log(`   - Comparando Bairro: DB "${item.neighborhood}" VS Selecionado "${neighborhood}" -> ${isMatch ? '✅ MATCH' : '❌ Diferente'}`);
+        return isMatch;
+      }
+    );
+    if (neighborhoodMatch) {
+      console.log(`🎉 [Fee Calculator] Coincidência de Nome de Bairro encontrada para "${neighborhoodMatch.neighborhood}" com taxa de R$ ${neighborhoodMatch.fee}`);
+    } else {
+      console.log(`⚠️ [Fee Calculator] Nenhuma correspondência de CEP ou Bairro. Taxa padrão de R$ 5,00 será aplicada.`);
+    }
+    return neighborhoodMatch;
+  }, [deliveryFees, neighborhood, cep]);
+
+  const deliveryFee = deliveryType === 'delivery'
+    ? (selectedNeighborhoodObj ? selectedNeighborhoodObj.fee : 5.00)
+    : 0.00;
   const finalTotal = totalAmount + deliveryFee;
+
+  // Generate suggestions and calculations for cash change
+  const cashChangeSuggestions = useMemo(() => {
+    const list: number[] = [];
+    const nextMultipleOf5 = Math.ceil(finalTotal / 5) * 5;
+    if (nextMultipleOf5 > finalTotal && nextMultipleOf5 !== finalTotal) {
+      list.push(nextMultipleOf5);
+    }
+    const nextMultipleOf10 = Math.ceil(finalTotal / 10) * 10;
+    if (nextMultipleOf10 > finalTotal && !list.includes(nextMultipleOf10)) {
+      list.push(nextMultipleOf10);
+    }
+    const standardNotes = [10, 20, 50, 100, 200];
+    for (const note of standardNotes) {
+      if (note > finalTotal && !list.includes(note)) {
+        list.push(note);
+      }
+    }
+    return list.sort((a, b) => a - b).slice(0, 3);
+  }, [finalTotal]);
+
+  const changeCalculation = useMemo(() => {
+    if (!cashChange) return null;
+    const clean = cashChange.toLowerCase().trim();
+    if (clean.includes('sem') || clean.includes('não') || clean.includes('nao') || clean === 'exato') {
+      return { isExact: true, change: 0, text: 'Sem troco (Levar valor exato)' };
+    }
+    const match = cashChange.replace('R$', '').replace(/\s+/g, '').replace(',', '.').match(/[\d.]+/);
+    if (match) {
+      const val = parseFloat(match[0]);
+      if (!isNaN(val)) {
+        if (Math.abs(val - finalTotal) < 0.01) {
+          return { isExact: true, change: 0, text: 'Sem troco (Valor exato)' };
+        }
+        if (val > finalTotal) {
+          return { isExact: false, paid: val, change: val - finalTotal, text: `Troco de R$ ${(val - finalTotal).toFixed(2)}` };
+        }
+        return { isExact: false, paid: val, change: 0, isLess: true, text: `Atenção: R$ ${val.toFixed(2)} é menor que R$ ${finalTotal.toFixed(2)}!` };
+      }
+    }
+    return null;
+  }, [cashChange, finalTotal]);
 
   const validateStep1 = () => {
     const errs: string[] = [];
@@ -123,6 +464,7 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
         neighborhood,
         city,
         reference: reference.trim() || undefined,
+        cep: cep.trim() || undefined,
       },
       paymentType,
       cardDetails: paymentType === 'card' ? {
@@ -136,6 +478,44 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
     // Simulate small backend transaction verify latency
     setTimeout(() => {
       onPlaceOrder(details);
+      
+      if (sendToWhatsApp && storePhone) {
+        const finalTotal = totalAmount + deliveryFee;
+        
+        const itemsText = cartItems.map(item => {
+          const itemPrice = item.customCupPrice || item.menuItem.price;
+          const itemInfo = `• *${item.quantity}x ${item.menuItem.name}* (R$ ${(itemPrice).toFixed(2)})`;
+          const itemDesc = item.menuItem.description ? `\n   _${item.menuItem.description}_` : '';
+          const notesStr = item.notes ? `\n   *Obs:* ${item.notes}` : '';
+          return `${itemInfo}${itemDesc}${notesStr}`;
+        }).join('\n\n');
+
+        const addressText = deliveryType === 'delivery' 
+          ? `📍 *Endereço de Entrega:*\n   ${street}, ${number} - ${neighborhood}, ${city}${cep ? ` (CEP: ${cep})` : ''}${reference ? `\n   *Ref:* ${reference}` : ''}`
+          : `📍 *Retirada no Balcão*`;
+
+        const paymentText = paymentType === 'pix' ? 'Pix ⚡'
+                          : paymentType === 'cash_on_delivery' ? `Dinheiro 💵${cashChange ? ` (Troco para ${cashChange})` : ''}`
+                          : paymentType === 'card_on_delivery' ? 'Maquininha de Cartão na Entrega 💳'
+                          : 'Cartão de Crédito Online 💳';
+
+        const waText = `🍨 *NOVO PEDIDO CONFIRMADO* 🍨\n\n` +
+                       `👤 *Cliente:* ${customerName}\n` +
+                       `📞 *WhatsApp:* ${customerPhone}\n\n` +
+                       `🛍️ *Itens do Pedido:*\n${itemsText}\n\n` +
+                       `🛵 *Taxa de Entrega:* R$ ${deliveryFee.toFixed(2)}\n` +
+                       `💰 *Total Geral:* R$ ${finalTotal.toFixed(2)}\n\n` +
+                       `💳 *Forma de Pagamento:* ${paymentText}\n\n` +
+                       `${addressText}\n\n` +
+                       `🤖 _Enviado via Cardápio Online Supreme_`;
+
+        const cleanPhone = storePhone.replace(/\D/g, '');
+        const formattedPhone = cleanPhone.length <= 11 ? `55${cleanPhone}` : cleanPhone;
+        const waUrl = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(waText)}`;
+        
+        window.open(waUrl, '_blank');
+      }
+
       setIsSubmitting(false);
     }, 2000);
   };
@@ -169,8 +549,13 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
     }
   };
 
-  // Pix code generator mock
-  const pixMockCode = `00020126580014br.gov.bcb.pix0136supremeicecream-pix-key-99881273918205204000053039865407${finalTotal.toFixed(2)}5802BR5918Sorveteria_Supreme6009Monte_Mor62070503***6304D792`;
+  // Dynamic Pix code generator based on custom settings or defaults
+  const pixMockCode = useMemo(() => {
+    const key = storeSettings?.pixKey || 'contato@sorveteriasupreme.com.br';
+    const name = storeSettings?.pixReceiverName || 'Sorveteria Supreme';
+    const city = storeSettings?.pixReceiverCity || 'Monte Mor';
+    return generatePixPayload(key, name, city, finalTotal);
+  }, [storeSettings, finalTotal]);
 
   const copyPixToClipboard = () => {
     navigator.clipboard.writeText(pixMockCode);
@@ -315,6 +700,82 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
                   <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1.5 border-b border-slate-100 pb-1.5">
                     <MapPin className="w-3.5 h-3.5 text-rose-500" /> Endereço de Entrega
                   </h4>
+
+                  {/* CEP Lookup input */}
+                  <div className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs space-y-1 animate-fadeIn">
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase tracking-wide flex items-center justify-between">
+                      <span>Buscar CEP (Correios)</span>
+                      {loadingCep ? (
+                        <span className="text-rose-500 text-[9px] animate-pulse lowercase font-bold">
+                          Buscando dados...
+                        </span>
+                      ) : (
+                        <a 
+                          href="https://buscacepinter.correios.com.br/app/endereco/index.php" 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="text-rose-500 hover:underline text-[9.5px] font-black normal-case flex items-center gap-0.5 transition-all"
+                        >
+                          Não sei meu CEP 🔍
+                        </a>
+                      )}
+                    </label>
+                    <div className="relative flex gap-1.5">
+                      <input
+                        type="text"
+                        value={cep}
+                        onChange={handleCepChange}
+                        placeholder="00000-000"
+                        maxLength={9}
+                        className="w-full text-xs p-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-slate-50/50 font-bold text-slate-800"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => lookupCep(cep)}
+                        disabled={loadingCep || cep.replace(/\D/g, '').length !== 8}
+                        className="px-3 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all disabled:from-slate-200 disabled:to-slate-200 disabled:text-slate-400 cursor-pointer disabled:cursor-not-allowed select-none active:scale-97"
+                      >
+                        Buscar
+                      </button>
+                    </div>
+                    {cepError ? (
+                      <p className="text-[9px] text-rose-600 font-extrabold mt-0.5">{cepError}</p>
+                    ) : (
+                      <p className="text-[8.5px] text-slate-400 font-medium mt-0.5">
+                        Ao digitar o CEP, os dados de rua, bairro e cidade se preenchem automaticamente.
+                      </p>
+                    )}
+
+                    {/* Visual CEP Diagnostics Box */}
+                    {cepDiagnostic.length > 0 && (
+                      <div className="mt-2.5 p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-1 animate-fadeIn">
+                        <div className="flex items-center justify-between text-[9px] font-black uppercase text-slate-500 tracking-wider">
+                          <span>🔍 Rastreamento Diagnóstico do CEP</span>
+                          <button 
+                            type="button" 
+                            onClick={() => setCepDiagnostic([])}
+                            className="text-rose-500 hover:text-rose-700 font-extrabold normal-case"
+                          >
+                            Fechar
+                          </button>
+                        </div>
+                        <div className="max-h-32 overflow-y-auto font-mono text-[8.5px] text-slate-600 space-y-0.5 leading-relaxed bg-white/80 p-2 rounded-lg border border-slate-100 invite-y divide-slate-100/50">
+                          {cepDiagnostic.map((line, idx) => {
+                            let textClass = "text-slate-650";
+                            if (line.includes("✅") || line.includes("🎉")) textClass = "text-emerald-600 font-bold";
+                            if (line.includes("❌") || line.includes("💥")) textClass = "text-rose-600 font-bold";
+                            if (line.includes("👉") || line.includes("🔍")) textClass = "text-indigo-600 font-semibold";
+                            return (
+                              <div key={idx} className={`py-1 ${textClass}`}>
+                                {line}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-3 gap-3">
                     <div className="col-span-2">
                       <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wide mb-1">Logradouro / Rua *</label>
@@ -341,13 +802,28 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wide mb-1">Bairro *</label>
-                      <input
-                        type="text"
-                        value={neighborhood}
-                        onChange={(e) => setNeighborhood(e.target.value)}
-                        placeholder="Ex: Centro"
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium animate-fadeIn"
-                      />
+                      {deliveryFees && deliveryFees.length > 0 ? (
+                        <select
+                          value={neighborhood}
+                          onChange={(e) => setNeighborhood(e.target.value)}
+                          className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium animate-fadeIn outline-none"
+                        >
+                          <option value="">Selecione...</option>
+                          {deliveryFees.map((df, idx) => (
+                            <option key={idx} value={df.neighborhood}>
+                              {df.neighborhood} (R$ {df.fee.toFixed(2)})
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          type="text"
+                          value={neighborhood}
+                          onChange={(e) => setNeighborhood(e.target.value)}
+                          placeholder="Ex: Centro"
+                          className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium animate-fadeIn"
+                        />
+                      )}
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wide mb-1">Cidade</label>
@@ -356,8 +832,7 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
                         value={city}
                         onChange={(e) => setCity(e.target.value)}
                         placeholder="Ex: Monte Mor"
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-neutral-100 text-slate-500 font-medium cursor-not-allowed"
-                        disabled
+                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800 animate-fadeIn"
                       />
                     </div>
                   </div>
@@ -398,50 +873,26 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-2">Forma de Pagamento</label>
                 <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentType('pix')}
-                    className={`py-3.5 px-4 rounded-2xl border text-xs font-extrabold flex items-center justify-center gap-2.5 transition-all ${
-                      paymentType === 'pix'
-                        ? 'border-emerald-500 bg-emerald-50/60 text-emerald-800 shadow-sm'
-                        : 'border-slate-100 hover:border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    <QrCode className="w-4 h-4 text-emerald-600" /> Pagar via PIX Online
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentType('card')}
-                    className={`py-3.5 px-4 rounded-2xl border text-xs font-extrabold flex items-center justify-center gap-2.5 transition-all ${
-                      paymentType === 'card'
-                        ? 'border-indigo-500 bg-indigo-50/60 text-indigo-800 shadow-sm'
-                        : 'border-slate-100 hover:border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    <CreditCard className="w-4 h-4 text-indigo-600" /> Cartão de Crédito
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentType('cash_on_delivery')}
-                    className={`py-3.5 px-4 rounded-2xl border text-xs font-extrabold flex items-center justify-center gap-2.5 transition-all ${
-                      paymentType === 'cash_on_delivery'
-                        ? 'border-rose-500 bg-rose-50/60 text-rose-800 shadow-sm'
-                        : 'border-slate-100 hover:border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    <Wallet className="w-4 h-4 text-rose-600" /> Dinheiro na Entrega
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentType('card_on_delivery')}
-                    className={`py-3.5 px-4 rounded-2xl border text-xs font-extrabold flex items-center justify-center gap-2.5 transition-all ${
-                      paymentType === 'card_on_delivery'
-                        ? 'border-rose-500 bg-rose-50/60 text-rose-800 shadow-sm'
-                        : 'border-slate-100 hover:border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    <CreditCard className="w-4 h-4 text-rose-600" /> Cartão na Entrega
-                  </button>
+                  {paymentMethods.map(method => (
+                    <button
+                      key={method.id}
+                      type="button"
+                      onClick={() => setPaymentType(method.id as PaymentType)}
+                      className={`py-3.5 px-4 rounded-2xl border text-xs font-extrabold flex items-center justify-center gap-2.5 transition-all outline-none cursor-pointer ${
+                        paymentType === method.id
+                          ? method.id === 'pix' ? 'border-emerald-500 bg-emerald-50/60 text-emerald-800 shadow-sm'
+                            : method.id === 'card' ? 'border-indigo-500 bg-indigo-50/60 text-indigo-800 shadow-sm'
+                            : 'border-rose-500 bg-rose-50/60 text-rose-800 shadow-sm'
+                          : 'border-slate-100 hover:border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {method.id === 'pix' ? <QrCode className="w-4 h-4 text-emerald-600" />
+                       : method.id === 'card' ? <CreditCard className="w-4 h-4 text-indigo-600" />
+                       : method.id === 'cash_on_delivery' ? <Wallet className="w-4 h-4 text-rose-600" />
+                       : <CreditCard className="w-4 h-4 text-rose-600" />}
+                      {method.label}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -451,33 +902,20 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
                 {paymentType === 'pix' && (
                   <div className="space-y-4 text-center animate-fadeIn">
                     <div className="flex flex-col items-center">
-                      <div className="bg-white p-3 rounded-2xl shadow-md border border-neutral-100 mb-2 relative">
-                        {/* Interactive QR representation */}
-                        <svg className="w-40 h-40 text-slate-800" viewBox="0 0 100 100">
-                          {/* Anchor corners */}
-                          <rect x="5" y="5" width="25" height="25" fill="currentColor" rx="2" />
-                          <rect x="9" y="9" width="17" height="17" fill="white" rx="1" />
-                          <rect x="13" y="13" width="9" height="9" fill="currentColor" rx="0.5" />
-
-                          <rect x="70" y="5" width="25" height="25" fill="currentColor" rx="2" />
-                          <rect x="74" y="9" width="17" height="17" fill="white" rx="1" />
-                          <rect x="78" y="13" width="9" height="9" fill="currentColor" rx="0.5" />
-
-                          <rect x="5" y="70" width="25" height="25" fill="currentColor" rx="2" />
-                          <rect x="9" y="74" width="17" height="17" fill="white" rx="1" />
-                          <rect x="13" y="78" width="9" height="9" fill="currentColor" rx="0.5" />
-
-                          {/* Complex inner matrix lines matching Pix design mock */}
-                          <path d="M 35,10 H 45 V 20 H 35 Z M 50,5 H 65 V 15 H 50 Z M 35,25 H 55 V 30 H 35 Z M 10,35 H 25 V 45 H 10 Z" fill="currentColor" />
-                          <path d="M 45,35 H 65 V 50 H 45 Z M 5,50 H 35 V 60 H 5 Z M 40,60 H 60 V 75 H 40 Z M 70,35 H 90 V 65 H 70 Z M 65,70 H 95 V 95 H 65 Z" fill="currentColor" />
-                          <path d="M 35,80 H 60 V 90 H 35 Z M 5,90 H 25 V 95 H 5 Z M 10,65 H 25 V 70 H 10 Z C 50,40 60,30 20,40 Z" fill="currentColor" />
-                          {/* Center Pix Icon logo */}
-                          <rect x="42" y="42" width="16" height="16" fill="#32bcad" rx="4" />
-                          <path d="M 46,50 L 50,46 L 54,50 L 50,54 Z" fill="white" />
-                        </svg>
+                      <div className="bg-white p-3 rounded-2xl shadow-md border border-neutral-100 mb-2 relative flex items-center justify-center w-48 h-48 mx-auto">
+                        {/* Dynamic QR code linked to custom Pix payload */}
+                        <img 
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(pixMockCode)}`}
+                          alt="QR Code Pix"
+                          className="w-40 h-40 object-contain rounded-lg select-none"
+                          referrerPolicy="no-referrer"
+                        />
                         
                         <div className="absolute inset-0 bg-white/70 backdrop-blur-[0.5px] items-center justify-center flex flex-col rounded-2xl opacity-0 hover:opacity-100 transition-opacity">
-                          <span className="text-[10px] font-bold bg-emerald-600 text-white rounded-full px-2 py-0.5 shadow">QR Ativo</span>
+                          <span className="text-[10px] font-black bg-emerald-600 text-white rounded-full px-2.5 py-1 shadow flex items-center gap-1 uppercase tracking-wider">
+                            <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                            QR Code Real Ativo
+                          </span>
                         </div>
                       </div>
 
@@ -521,7 +959,40 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
                 {/* 2. Credit Card Layout */}
                 {paymentType === 'card' && (
                   <div className="space-y-4 animate-fadeIn">
-                    {/* Visual Card Display */}
+                     {/* PagSeguro Security & Integration Banners */}
+                     {storeSettings?.pagseguroEnabled ? (
+                       <div className="border border-emerald-100 bg-emerald-50/40 p-3.5 rounded-2xl space-y-1.5 text-left mb-3">
+                         <div className="flex items-center gap-1.5 text-emerald-800">
+                           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                           <h4 className="text-xs font-black uppercase tracking-wider">🛡️ Ambiente Seguro PagSeguro Ativo</h4>
+                         </div>
+                         <p className="text-[10.5px] text-emerald-850 font-semibold leading-relaxed">
+                           Sua transação de <span className="font-bold text-emerald-900">R$ {finalTotal.toFixed(2)}</span> está protegida por criptografia de ponta e será processada instantaneamente diretamente pelo PagSeguro.
+                         </p>
+                         
+                         {(!storeSettings?.pagseguroEmail || !storeSettings?.pagseguroToken) && (
+                           <div className="border-t border-emerald-150 pt-2 mt-1.5">
+                             <div className="bg-amber-50 border border-amber-200/65 p-2 rounded-xl text-[9px] text-amber-800 font-bold leading-normal">
+                               ⚠️ <strong>Nota para o Lojista:</strong> Para aceitar pagamentos de cartões reais de clientes direto na sua conta bancária, lembre-se de salvar seu <strong>E-mail</strong> e <strong>Token PagSeguro</strong> na guia de Pagamentos no Painel Administrativo!
+                             </div>
+                           </div>
+                         )}
+                       </div>
+                     ) : (
+                       <div className="border border-slate-200 bg-slate-50/50 p-3.5 rounded-2xl space-y-1 text-left mb-3">
+                         <div className="flex items-center gap-1.5 text-slate-705">
+                           <Check className="w-3.5 h-3.5 text-slate-500" />
+                           <h4 className="text-xs font-extrabold uppercase tracking-wide">Pagar no Cartão de Crédito</h4>
+                         </div>
+                         <p className="text-[10px] text-slate-500 font-medium leading-relaxed">
+                           Por padrão, envie o pedido para liberação e pague na maquininha física na entrega. 
+                           <br />
+                           💡 <strong>Dica:</strong> Se você é o dono da loja, pode ativar o <strong>Recebimento Autônomo Online por Cartão</strong> conectando sua conta <strong>PagSeguro</strong> no Painel Admin!
+                         </p>
+                       </div>
+                     )}
+
+                     {/* Visual Card Display */}
                     <div className="perspective flex justify-center py-2 h-[155px]">
                       <motion.div
                         initial={false}
@@ -634,15 +1105,110 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
                       Pagamento Realizado no Ato da {deliveryType === 'delivery' ? 'Entrega' : 'Retirada'}
                     </h5>
                     <p className="text-[11px] text-slate-500 leading-normal max-w-sm mx-auto font-medium">
-                      O entregador levará a {paymentType === 'cash_on_delivery' ? 'maquininha de cartão' : 'maquininha de débito/crédito ou troco em dinheiro'} até você. <br />
+                      O entregador levará {paymentType === 'cash_on_delivery' ? 'o troco em dinheiro' : 'a maquininha de cartão'} até você. <br />
                       Fique atento ao som da campainha e prepare seu celular ou cartão!
                     </p>
+                    
+                    {paymentType === 'cash_on_delivery' && (
+                      <div className="mt-3 text-left max-w-sm mx-auto space-y-2.5 bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                        <div className="flex justify-between items-center text-[10px] uppercase font-black tracking-wider text-slate-500">
+                          <span>Total do Pedido:</span>
+                          <span className="text-xs text-rose-600 font-extrabold bg-rose-50 px-2 py-0.5 rounded-md border border-rose-100">
+                            R$ {finalTotal.toFixed(2)}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-bold text-slate-550 uppercase tracking-wide font-black">
+                            Precisa de Troco? (Se sim, para quanto?)
+                          </label>
+                          <input
+                            type="text"
+                            value={cashChange}
+                            onChange={(e) => setCashChange(e.target.value)}
+                            placeholder="Ex: Troco para R$ 50,00 ou sem troco"
+                            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-bold text-slate-800"
+                          />
+                        </div>
+
+                        {/* Quick Action Suggestion Chips */}
+                        <div className="space-y-1">
+                          <span className="block text-[9px] font-black uppercase text-slate-400 tracking-wider">Atalhos rápidos:</span>
+                          <div className="flex flex-wrap gap-1.5 font-sans">
+                            <button
+                              type="button"
+                              onClick={() => setCashChange('Sem troco')}
+                              className={`text-[9.5px] px-2.5 py-1.5 font-bold rounded-lg border transition-all cursor-pointer ${
+                                cashChange.toLowerCase().includes('sem')
+                                  ? 'bg-rose-500 border-rose-500 text-white shadow-xs'
+                                  : 'bg-white border-slate-200 text-slate-705 hover:bg-slate-50'
+                              }`}
+                            >
+                              💵 Sem Troco
+                            </button>
+                            {cashChangeSuggestions.map((noteVal) => {
+                              const noteLabel = `Troco para R$ ${noteVal.toFixed(2)}`;
+                              const isSelected = cashChange.includes(String(noteVal)) || cashChange === noteLabel;
+                              return (
+                                <button
+                                  key={noteVal}
+                                  type="button"
+                                  onClick={() => setCashChange(`Troco para R$ ${noteVal.toFixed(2)}`)}
+                                  className={`text-[9.5px] px-2.5 py-1.5 font-bold rounded-lg border transition-all cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-rose-500 border-rose-500 text-white shadow-xs'
+                                      : 'bg-white border-slate-205 text-slate-700 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  💳 R$ {noteVal}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Dynamic Live Change feedback block with calculated sum */}
+                        {changeCalculation && (
+                          <div className={`p-2.5 rounded-xl text-[10px] font-bold border flex items-center justify-between gap-2 mt-1 animate-fadeIn ${
+                            changeCalculation.isLess
+                              ? 'bg-amber-50 border-amber-200 text-amber-800'
+                              : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                          }`}>
+                            <span className="font-extrabold uppercase tracking-wide">Calculadora:</span>
+                            <span className="bg-white/70 px-2 py-0.5 rounded font-black border border-white">
+                              {changeCalculation.text}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
             </motion.div>
           )}
         </div>
+
+        {/* WhatsApp Checkout Preferences (Only in Step 2) */}
+        {step === 2 && (
+          <div className="bg-emerald-50/40 p-3 rounded-2xl border border-emerald-100/60 flex items-center justify-between gap-3 text-left">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="text-lg">💬</span>
+              <div>
+                <h5 className="text-[11.5px] font-black text-emerald-950">Enviar pedido p/ WhatsApp</h5>
+                <p className="text-[9.5px] text-emerald-800 font-medium leading-tight">Abre o seu WhatsApp com a mensagem do pedido pronta ao finalizar!</p>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer select-none">
+              <input 
+                type="checkbox" 
+                checked={sendToWhatsApp} 
+                onChange={(e) => setSendToWhatsApp(e.target.checked)}
+                className="w-4.5 h-4.5 text-emerald-600 rounded-md accent-emerald-550 focus:ring-emerald-500 cursor-pointer"
+              />
+            </label>
+          </div>
+        )}
 
         {/* Pricing footer & buttons */}
         <div className="border-t border-rose-50/80 pt-4 mt-4 flex flex-col gap-2 flex-shrink-0">
@@ -653,7 +1219,7 @@ export default function Checkout({ cartItems, totalAmount, onPlaceOrder, onClose
           {deliveryType === 'delivery' && (
             <div className="flex justify-between items-center text-xs text-slate-600 font-semibold">
               <span>Taxa de Entrega:</span>
-              <span className="text-rose-500">+ R$ 5.00</span>
+              <span className="text-rose-500">+ R$ {deliveryFee.toFixed(2)}</span>
             </div>
           )}
           <div className="flex justify-between items-center text-sm font-black text-slate-800 border-t border-dashed border-slate-200 pt-1.5">

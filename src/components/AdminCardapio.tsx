@@ -17,11 +17,13 @@ import {
   Sliders,
   X,
   PlusCircle,
-  FolderOpen
+  FolderOpen,
+  Upload
 } from 'lucide-react';
 import { collection, addDoc, setDoc, deleteDoc, doc, writeBatch } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { MenuItem } from '../types';
+import { MENU_ITEMS, FLAVOR_OPTIONS, TOPPING_OPTIONS } from '../data';
 
 interface AdminCardapioProps {
   menuItems: MenuItem[];
@@ -45,6 +47,8 @@ export default function AdminCardapio({ menuItems, onRefreshMenu }: AdminCardapi
   const [isPopular, setIsPopular] = useState(false);
   const [isCustomizable, setIsCustomizable] = useState(false);
   const [tagsString, setTagsString] = useState('');
+  const [allowedToppings, setAllowedToppings] = useState<string[]>([]);
+  const [allowedFlavors, setAllowedFlavors] = useState<string[]>([]);
 
   // Status/Messages
   const [loading, setLoading] = useState(false);
@@ -69,6 +73,8 @@ export default function AdminCardapio({ menuItems, onRefreshMenu }: AdminCardapi
     setIsPopular(false);
     setIsCustomizable(true);
     setTagsString('Novidade, Customizável');
+    setAllowedToppings(TOPPING_OPTIONS.map(t => t.id));
+    setAllowedFlavors(FLAVOR_OPTIONS.map(f => f.id));
     setErrorMsg('');
     setSuccessMsg('');
     setIsFormOpen(true);
@@ -84,6 +90,8 @@ export default function AdminCardapio({ menuItems, onRefreshMenu }: AdminCardapi
     setIsPopular(!!item.popular);
     setIsCustomizable(!!item.customizable);
     setTagsString(item.tags ? item.tags.join(', ') : '');
+    setAllowedToppings(item.allowedToppings && item.allowedToppings.length > 0 ? item.allowedToppings : TOPPING_OPTIONS.map(t => t.id));
+    setAllowedFlavors(item.allowedFlavors && item.allowedFlavors.length > 0 ? item.allowedFlavors : FLAVOR_OPTIONS.map(f => f.id));
     setErrorMsg('');
     setSuccessMsg('');
     setIsFormOpen(true);
@@ -113,6 +121,8 @@ export default function AdminCardapio({ menuItems, onRefreshMenu }: AdminCardapi
       image: imageUrl.trim() || PRESET_IMAGES[0].url,
       popular: isPopular,
       customizable: isCustomizable,
+      allowedToppings: isCustomizable ? allowedToppings : undefined,
+      allowedFlavors: isCustomizable ? allowedFlavors : undefined,
       tags: tags.length > 0 ? tags : undefined
     };
 
@@ -138,7 +148,8 @@ export default function AdminCardapio({ menuItems, onRefreshMenu }: AdminCardapi
       }, 1500);
     } catch (err) {
       console.error(err);
-      setErrorMsg('Erro ao salvar o item no Firestore. Verifique suas permissões.');
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMsg(`Erro ao salvar no Firestore: ${msg}`);
       try {
         handleFirestoreError(err, OperationType.WRITE, `menu_items/${parsedId}`);
       } catch (innerErr) {}
@@ -171,6 +182,116 @@ export default function AdminCardapio({ menuItems, onRefreshMenu }: AdminCardapi
     }
   };
 
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 500;
+        const MAX_HEIGHT = 500;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+          setImageUrl(compressedBase64);
+          setSuccessMsg('📸 Foto de computador carregada e otimizada!');
+          setTimeout(() => setSuccessMsg(''), 3500);
+        } else {
+          setErrorMsg('Não foi possível otimizar esta foto.');
+        }
+        setLoading(false);
+      };
+      
+      img.onerror = () => {
+        setErrorMsg('Arquivo de imagem inválido ou corrompido.');
+        setLoading(false);
+      };
+
+      if (event.target?.result) {
+        img.src = event.target.result as string;
+      }
+    };
+
+    reader.onerror = () => {
+      setErrorMsg('Erro ao ler a foto do computador.');
+      setLoading(false);
+    };
+
+    reader.readAsDataURL(file);
+  };
+
+  // Restore only the missing original/default items without deleting custom items
+  const handleRestoreMissingDefaults = async () => {
+    setLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const batch = writeBatch(db);
+      
+      let addedCount = 0;
+      MENU_ITEMS.forEach((defaultItem, idx) => {
+        const itemExists = menuItems.some(
+          item => item.id === defaultItem.id || item.name.toLowerCase() === defaultItem.name.toLowerCase()
+        );
+        if (!itemExists) {
+          const docRef = doc(db, 'menu_items', defaultItem.id);
+          batch.set(docRef, {
+            name: defaultItem.name,
+            description: defaultItem.description,
+            price: defaultItem.price,
+            category: defaultItem.category,
+            image: defaultItem.image,
+            popular: !!defaultItem.popular,
+            customizable: !!defaultItem.customizable,
+            tags: defaultItem.tags || [],
+            index: idx
+          });
+          addedCount++;
+        }
+      });
+
+      if (addedCount > 0) {
+        await batch.commit();
+        setSuccessMsg(`✅ ${addedCount} produtos originais ausentes foram restaurados com sucesso! Seus novos itens foram mantidos.`);
+      } else {
+        setSuccessMsg('✨ Todos os produtos padrão já estão presentes no cardápio!');
+      }
+      setTimeout(() => setSuccessMsg(''), 5000);
+    } catch (err: any) {
+      console.error('Failed to restore missing items:', err);
+      setErrorMsg(`Falha ao restaurar produtos padrões vinculados: ${err?.message || err}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Re-order and save all items prioritised index in Firebase
   const handleResetToDefault = async () => {
     if (!window.confirm('Deseja reinicializar o cardápio inteiro para os valores padrão originais? Quaisquer novos itens adicionados serão sobrescritas.')) {
@@ -181,7 +302,6 @@ export default function AdminCardapio({ menuItems, onRefreshMenu }: AdminCardapi
     setSuccessMsg('');
 
     try {
-      const { MENU_ITEMS } = await import('../data');
       const batch = writeBatch(db);
       
       // 1. Delete all currently displayed items first
@@ -201,7 +321,7 @@ export default function AdminCardapio({ menuItems, onRefreshMenu }: AdminCardapi
           image: item.image,
           popular: !!item.popular,
           customizable: !!item.customizable,
-          tags: item.tags || null,
+          tags: item.tags || [],
           index: idx
         });
       });
@@ -209,9 +329,9 @@ export default function AdminCardapio({ menuItems, onRefreshMenu }: AdminCardapi
       await batch.commit();
       setSuccessMsg('✅ Cardápio redefinido com sucesso para os dados padrão!');
       setTimeout(() => setSuccessMsg(''), 3000);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to reset menu:', err);
-      setErrorMsg('Falha ao restaurar dados padrões.');
+      setErrorMsg(`Falha ao restaurar dados padrões: ${err?.message || err}`);
     } finally {
       setLoading(false);
     }
@@ -287,6 +407,28 @@ export default function AdminCardapio({ menuItems, onRefreshMenu }: AdminCardapi
         <div className="p-3 bg-rose-50 border border-rose-100 text-rose-700 rounded-xl text-xs flex items-center gap-2 font-bold">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
           {errorMsg}
+        </div>
+      )}
+
+      {/* Dynamic recovery banner for users who might have lost default items when writing a custom item */}
+      {menuItems.length > 0 && menuItems.length < 8 && (
+        <div className="p-4.5 bg-rose-50 border border-rose-100 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-xs font-medium text-slate-750">
+          <div className="space-y-1">
+            <p className="font-extrabold text-rose-700 flex items-center gap-1.5 text-sm">
+              💡 Sumiram os produtos anteriores padrão?
+            </p>
+            <p className="text-slate-600 text-[11px] leading-relaxed">
+              Ao cadastrar um item no banco de dados pela primeira vez, os produtos demonstrativos locais podem ter sido ocultados do seu painel. 
+              Clique abaixo para <strong>restaurar e misturar todos os produtos anteriores padrão</strong> de volta sem perder seu novo produto criado!
+            </p>
+          </div>
+          <button
+            onClick={handleRestoreMissingDefaults}
+            disabled={loading}
+            className="w-full sm:w-auto px-4 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 text-white font-black text-[10px] uppercase tracking-wider rounded-xl shadow-lg shadow-rose-100 transition-all cursor-pointer whitespace-nowrap align-middle"
+          >
+            {loading ? 'Processando...' : '🔄 Restaurar Produtos Anteriores'}
+          </button>
         </div>
       )}
 
@@ -521,10 +663,57 @@ export default function AdminCardapio({ menuItems, onRefreshMenu }: AdminCardapi
 
                 {/* Image Selection & pasting */}
                 <div className="space-y-2">
-                  <label className="block text-[10px] font-black uppercase text-slate-450 tracking-wide">URL ou Predefinição da Imagem</label>
+                  <label className="block text-[10px] font-black uppercase text-slate-450 tracking-wide">Imagem do Produto</label>
+
+                  {/* Local Upload Widget */}
+                  <div className="flex flex-col sm:flex-row gap-3 items-center bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                    <div className="w-16 h-16 rounded-xl bg-slate-200 border border-slate-300 overflow-hidden flex-shrink-0 relative flex items-center justify-center">
+                      {imageUrl ? (
+                        <img src={imageUrl} alt="Pré-visualização" className="w-full h-full object-cover" />
+                      ) : (
+                        <Image className="w-6 h-6 text-slate-400" />
+                      )}
+                    </div>
+
+                    <div className="flex-1 w-full space-y-2 text-center sm:text-left">
+                      <p className="text-[10px] leading-tight text-slate-500 font-medium">
+                        Selecione uma foto da pasta do seu computador. Ela será otimizada automaticamente!
+                      </p>
+
+                      <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
+                        <label className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-[10px] uppercase tracking-wide rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5 justify-center">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Enviar do Computador</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageFileChange}
+                            className="hidden"
+                          />
+                        </label>
+                        {imageUrl && !imageUrl.startsWith('/') && !imageUrl.startsWith('http') && (
+                          <button
+                            type="button"
+                            onClick={() => setImageUrl(PRESET_IMAGES[0].url)}
+                            className="px-2.5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-extrabold text-[10px] uppercase tracking-wide rounded-xl transition-colors cursor-pointer"
+                          >
+                            Limpar Foto
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="relative py-1 flex items-center justify-center">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-slate-200" />
+                    </div>
+                    <span className="relative px-3 bg-white text-[9px] uppercase font-black tracking-widest text-slate-400">Ou use Link / Padrão</span>
+                  </div>
+
                   <input
                     type="text"
-                    placeholder="Past item photo URL..."
+                    placeholder="Cole um link de imagem aqui..."
                     value={imageUrl}
                     onChange={(e) => setImageUrl(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl font-bold text-[10px] text-slate-600 placeholder-slate-400 focus:outline-hidden focus:border-rose-450 transition-colors"
@@ -576,6 +765,94 @@ export default function AdminCardapio({ menuItems, onRefreshMenu }: AdminCardapi
                     </div>
                   </label>
                 </div>
+
+                {isCustomizable && (
+                  <div className="space-y-3 bg-slate-50/55 p-3.5 rounded-2xl border border-slate-100 font-sans">
+                    <div>
+                      <h4 className="text-[10px] uppercase font-black tracking-wider text-slate-500 mb-2">🍨 Sabores de Sorvete Permitidos</h4>
+                      <div className="flex gap-2 mb-2">
+                        <button
+                          type="button"
+                          onClick={() => setAllowedFlavors(FLAVOR_OPTIONS.map(f => f.id))}
+                          className="px-2 py-1 bg-white border border-slate-200 rounded-md text-[8.5px] font-black uppercase hover:bg-slate-100 cursor-pointer text-slate-600 transition-colors"
+                        >
+                          Marcar Todos
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAllowedFlavors([])}
+                          className="px-2 py-1 bg-white border border-slate-200 rounded-md text-[8.5px] font-black uppercase hover:bg-slate-100 cursor-pointer text-slate-600 transition-colors"
+                        >
+                          Desmarcar Todos
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5 max-h-[140px] overflow-y-auto p-1.5 border border-slate-200 rounded-xl bg-white">
+                        {FLAVOR_OPTIONS.map(f => {
+                          const isChecked = allowedFlavors.includes(f.id);
+                          return (
+                            <label key={f.id} className="flex items-center gap-2 cursor-pointer p-1 rounded-lg hover:bg-slate-50 text-[10px] font-bold text-slate-600">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  if (isChecked) {
+                                    setAllowedFlavors(allowedFlavors.filter(id => id !== f.id));
+                                  } else {
+                                    setAllowedFlavors([...allowedFlavors, f.id]);
+                                  }
+                                }}
+                                className="w-3.5 h-3.5 text-rose-500 border-slate-300 rounded focus:ring-rose-450 cursor-pointer"
+                              />
+                              <span className="truncate">{f.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <h4 className="text-[10px] uppercase font-black tracking-wider text-slate-500 mb-2">🍓 Toppings & Adicionais Permitidos</h4>
+                      <div className="flex gap-2 mb-2">
+                        <button
+                          type="button"
+                          onClick={() => setAllowedToppings(TOPPING_OPTIONS.map(t => t.id))}
+                          className="px-2 py-1 bg-white border border-slate-200 rounded-md text-[8.5px] font-black uppercase hover:bg-slate-100 cursor-pointer text-slate-600 transition-colors"
+                        >
+                          Marcar Todos
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAllowedToppings([])}
+                          className="px-2 py-1 bg-white border border-slate-200 rounded-md text-[8.5px] font-black uppercase hover:bg-slate-100 cursor-pointer text-slate-600 transition-colors"
+                        >
+                          Desmarcar Todos
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[160px] overflow-y-auto p-1.5 border border-slate-200 rounded-xl bg-white">
+                        {TOPPING_OPTIONS.map(t => {
+                          const isChecked = allowedToppings.includes(t.id);
+                          return (
+                            <label key={t.id} className="flex items-center gap-2 cursor-pointer p-1 rounded-lg hover:bg-slate-50 text-[10px] font-bold text-slate-600">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  if (isChecked) {
+                                    setAllowedToppings(allowedToppings.filter(id => id !== t.id));
+                                  } else {
+                                    setAllowedToppings([...allowedToppings, t.id]);
+                                  }
+                                }}
+                                className="w-3.5 h-3.5 text-rose-500 border-slate-300 rounded focus:ring-rose-450 cursor-pointer"
+                              />
+                              <span className="truncate">{t.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Custom Tags */}
                 <div className="space-y-1">

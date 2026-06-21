@@ -9,6 +9,13 @@ import { Plus, Minus, Check, ShoppingBag, Sparkles, Layers, CupSoda, Ruler } fro
 import { ToppingOption, FlavorOption, CustomCupConfig, CartItem, MenuItem } from '../types';
 import { FLAVOR_OPTIONS, TOPPING_OPTIONS, getCustomCupBasePrice } from '../data';
 
+const EXTRA_BROWNIE_PRODUCTS = [
+  { id: 'fatia-brownie', name: 'Fatia de Brownie Tradicional Extra', price: 9.95, desc: 'Fatia fresca de brownie artesanal' },
+  { id: 'brownie-recheado', name: 'Brownie Recheado com Doce de Leite Extra', price: 11.95, desc: 'Brownie com generoso doce de leite' },
+  { id: 'mini-vulcao', name: 'Mini Vulcão de Chocolate com Brownie Extra', price: 15.95, desc: 'Bolo de brownie cremoso com calda vulcão' },
+  { id: 'cookies-brownie', name: 'Cookies de Brownie Crocante', price: 8.50, desc: 'Pacotinho com cookies crocantes da nossa massa' }
+];
+
 interface CupCustomizerProps {
   onAddToCart: (item: CartItem) => void;
   onClose: () => void;
@@ -23,6 +30,7 @@ export default function CupCustomizer({ onAddToCart, onClose, customizingItem }:
   const [base, setBase] = useState<'acai' | 'sorvete' | 'casadinho'>(isMilkshake ? 'sorvete' : 'casadinho');
   const [selectedFlavors, setSelectedFlavors] = useState<string[]>(isMilkshake ? ['baunilha'] : ['acai-puro-organico']);
   const [selectedToppings, setSelectedToppings] = useState<string[]>([]);
+  const [extraBrownieProducts, setExtraBrownieProducts] = useState<Record<string, number>>({});
   const [notes, setNotes] = useState('');
 
   // Sizing mappings for visual display
@@ -74,28 +82,38 @@ export default function CupCustomizer({ onAddToCart, onClose, customizingItem }:
 
   // Filter flavors based on base type chosen
   const availableFlavors = useMemo(() => {
+    let list = FLAVOR_OPTIONS;
     if (base === 'acai') {
-      return FLAVOR_OPTIONS.filter((f) => f.id === 'acai-puro-organico');
-    }
-    if (base === 'sorvete') {
-      return FLAVOR_OPTIONS.filter((f) => f.category === 'sorvete');
-    }
-    if (base === 'casadinho') {
+      list = FLAVOR_OPTIONS.filter((f) => f.id === 'acai-puro-organico');
+    } else if (base === 'sorvete') {
+      list = FLAVOR_OPTIONS.filter((f) => f.category === 'sorvete');
+    } else if (base === 'casadinho') {
       // For casadinho (açaí + ice cream), we fix Açaí Puro Orgânico and let them select a sorvete flavour!
-      return FLAVOR_OPTIONS.filter((f) => f.id === 'acai-puro-organico' || f.category === 'sorvete');
+      list = FLAVOR_OPTIONS.filter((f) => f.id === 'acai-puro-organico' || f.category === 'sorvete');
     }
-    return FLAVOR_OPTIONS;
-  }, [base]);
+
+    if (customizingItem?.allowedFlavors && customizingItem.allowedFlavors.length > 0) {
+      list = list.filter((f) => customizingItem.allowedFlavors?.includes(f.id));
+    }
+    return list;
+  }, [base, customizingItem]);
 
   // Toppings sorted by category for clean tabs/sections
   const toppingsByCategory = useMemo(() => {
     const categories: Record<string, ToppingOption[]> = {
       cortesia: [],
       creme: [],
+      fruta: [],
       crocante: [],
       calda: [],
     };
-    TOPPING_OPTIONS.forEach((topping) => {
+
+    let list = TOPPING_OPTIONS;
+    if (customizingItem?.allowedToppings && customizingItem.allowedToppings.length > 0) {
+      list = TOPPING_OPTIONS.filter((t) => customizingItem.allowedToppings?.includes(t.id));
+    }
+
+    list.forEach((topping) => {
       if (topping.id.startsWith('gratis-')) {
         if (!isMilkshake) {
           categories['cortesia'].push(topping);
@@ -105,10 +123,11 @@ export default function CupCustomizer({ onAddToCart, onClose, customizingItem }:
       }
     });
     return categories;
-  }, [isMilkshake]);
+  }, [isMilkshake, customizingItem]);
 
   const basePrice = useMemo(() => {
     if (isLinhaBrownie) {
+      if (size === '300ml') return 16.90;
       if (size === '400ml') return 22.90;
       if (size === '500ml') return 28.90;
       if (size === '700ml') return 34.90;
@@ -130,7 +149,15 @@ export default function CupCustomizer({ onAddToCart, onClose, customizingItem }:
     }, 0);
   }, [selectedToppings]);
 
-  const totalPrice = basePrice + toppingsPrice;
+  const extraProductsPrice = useMemo(() => {
+    if (!isLinhaBrownie) return 0;
+    return Object.entries(extraBrownieProducts).reduce((total, [id, qty]) => {
+      const prod = EXTRA_BROWNIE_PRODUCTS.find(p => p.id === id);
+      return total + (prod ? prod.price * qty : 0);
+    }, 0);
+  }, [isLinhaBrownie, extraBrownieProducts]);
+
+  const totalPrice = basePrice + toppingsPrice + extraProductsPrice;
 
   const handleFlavorToggle = (id: string) => {
     if (id === 'acai-puro-organico' && (base === 'acai' || base === 'casadinho')) {
@@ -173,6 +200,18 @@ export default function CupCustomizer({ onAddToCart, onClose, customizingItem }:
       ? customizingItem.description
       : 'Escolha o tamanho da sua vontade, temos 4 tamanhos e em todos com cortesia leite condensado, leite em po, banana, morango e granola.';
 
+    // Get extra brownie products string
+    const extraProductsString = isLinhaBrownie
+      ? Object.entries(extraBrownieProducts)
+          .filter(([_, qty]) => qty > 0)
+          .map(([id, qty]) => {
+            const prod = EXTRA_BROWNIE_PRODUCTS.find(p => p.id === id);
+            return prod ? `${qty}x ${prod.name}` : '';
+          })
+          .filter(Boolean)
+          .join(', ')
+      : '';
+
     // Generate a dummy item representing this custom cup
     const representationItem: MenuItem = {
       id: customizingItem ? `${customizingItem.id}-custom-${Date.now()}` : `custom-cup-${Date.now()}`,
@@ -187,7 +226,7 @@ export default function CupCustomizer({ onAddToCart, onClose, customizingItem }:
           .map((tId) => TOPPING_OPTIONS.find((t) => t.id === tId)?.name)
           .filter(Boolean)
           .join(', ') || 'Nenhum'
-      }.`,
+      }.${extraProductsString ? ` Outros: ${extraProductsString}.` : ''}`,
       price: totalPrice,
       category: isMilkshake ? 'milkshake' : base === 'acai' ? 'acai' : 'sorvete',
       image: customizingItem?.image || '/assets/images/supreme_acai_cup_1781179584520.jpg',
@@ -533,6 +572,83 @@ export default function CupCustomizer({ onAddToCart, onClose, customizingItem }:
                 })}
               </div>
             </div>
+
+            {/* Extra Brownie Products (Only if isLinhaBrownie) */}
+            {isLinhaBrownie && (
+              <div className="bg-rose-50/20 p-4 rounded-2xl border border-rose-100/60 space-y-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-base">🍫</span>
+                  <div>
+                    <h4 className="text-sm font-bold text-rose-950">Mais Delícias da Linha Brownie</h4>
+                    <p className="text-[10px] text-rose-800 font-medium leading-tight">Quer adicionar outros produtos fresquinhos e irresistíveis ao seu pedido?</p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {EXTRA_BROWNIE_PRODUCTS.map((prod) => {
+                    const currentQty = extraBrownieProducts[prod.id] || 0;
+                    return (
+                      <div key={prod.id} className="flex items-center justify-between bg-white/80 backdrop-blur-xs p-2.5 rounded-xl border border-rose-50/50 hover:border-rose-100 transition-colors shadow-xs">
+                        <div className="min-w-0 pr-2">
+                          <p className="text-xs font-bold text-slate-800 truncate">{prod.name}</p>
+                          <p className="text-[10px] text-slate-500 leading-tight line-clamp-1">{prod.desc}</p>
+                          <p className="text-xs text-rose-600 font-extrabold mt-0.5">R$ {prod.price.toFixed(2)}</p>
+                        </div>
+
+                        <div className="flex items-center gap-2.5">
+                          {currentQty > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setExtraBrownieProducts((prev) => ({
+                                  ...prev,
+                                  [prod.id]: Math.max(0, currentQty - 1)
+                                }));
+                              }}
+                              className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-700 font-black rounded-lg text-xs cursor-pointer active:scale-95 transition-all"
+                            >
+                              -
+                            </button>
+                          )}
+                          
+                          {currentQty > 0 ? (
+                            <span className="text-xs font-black text-rose-600 w-4 text-center">{currentQty}</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setExtraBrownieProducts((prev) => ({
+                                  ...prev,
+                                  [prod.id]: 1
+                                }));
+                              }}
+                              className="px-2.5 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200/50 rounded-lg text-[10px] font-black uppercase cursor-pointer"
+                            >
+                              Adicionar
+                            </button>
+                          )}
+
+                          {currentQty > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setExtraBrownieProducts((prev) => ({
+                                  ...prev,
+                                  [prod.id]: currentQty + 1
+                                }));
+                              }}
+                              className="w-7 h-7 flex items-center justify-center bg-rose-500 hover:bg-rose-600 text-white font-black rounded-lg text-xs cursor-pointer active:scale-95 transition-all"
+                            >
+                              +
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Notes Input */}
             <div>

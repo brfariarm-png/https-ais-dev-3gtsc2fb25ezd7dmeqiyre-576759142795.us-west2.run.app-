@@ -14,6 +14,7 @@ import {
   Clock, 
   Phone, 
   Instagram, 
+  MessageCircle, 
   Maximize2, 
   Plus, 
   Minus, 
@@ -29,7 +30,11 @@ import {
   ShieldAlert,
   RefreshCw,
   Printer,
-  Share2
+  Share2,
+  Check,
+  Copy,
+  Coins,
+  CreditCard
 } from 'lucide-react';
 
 import { 
@@ -59,7 +64,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
 
-import { MenuItem, CartItem, Order, CheckoutDetails, OrderStatus } from './types';
+import { MenuItem, CartItem, Order, CheckoutDetails, OrderStatus, StoreSettings } from './types';
 import { MENU_ITEMS, FLAVOR_OPTIONS, TOPPING_OPTIONS, STORE_CONFIG } from './data';
 import CupCustomizer from './components/CupCustomizer';
 import Checkout from './components/Checkout';
@@ -71,6 +76,7 @@ import AdminPDV from './components/AdminPDV';
 import AdminFechamento from './components/AdminFechamento';
 import AdminImpressora from './components/AdminImpressora';
 import AdminCardapio from './components/AdminCardapio';
+import AdminWhatsAppBot from './components/AdminWhatsAppBot';
 
 const BannerImage = "/assets/images/supreme_banner_1780583592745.png";
 const LogoImage = "/assets/images/supreme_logo_1780583608054.png";
@@ -88,19 +94,23 @@ export default function App() {
   // State for authenticated firebase user
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   // Store dynamic configurations with local persistence
-  const [storeSettings, setStoreSettings] = useState(() => {
+  const [storeSettings, setStoreSettings] = useState<StoreSettings>(() => {
     const saved = localStorage.getItem('supreme_store_settings');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         
         // Migrate legacy Sorocaba and helper placeholders to the new defaults
-        const city = (parsed.city === 'Sorocaba' || !parsed.city) ? STORE_CONFIG.city : parsed.city;
-        const address = (parsed.address === 'Av. General Carneiro, 1205 - Vila Lucy - Sorocaba/SP' || 
-                         parsed.address === 'Av. General Carneiro, 1205 - Vila Lucy - Monte Mor/SP' || 
-                         !parsed.address) ? STORE_CONFIG.address : parsed.address;
-        const phone = (parsed.phone === '(15) 99123-4567' || !parsed.phone) ? STORE_CONFIG.phone : parsed.phone;
-
+        const cleanOldCity = parsed.city ? String(parsed.city).trim() : '';
+        const cleanOldAddress = parsed.address ? String(parsed.address).trim() : '';
+        const cleanOldPhone = parsed.phone ? String(parsed.phone).trim() : '';
+ 
+        const hasSorocaba = /sorocaba/i.test(cleanOldCity) || /sorocaba/i.test(cleanOldAddress);
+        
+        const city = (hasSorocaba || !parsed.city) ? STORE_CONFIG.city : parsed.city;
+        const address = (hasSorocaba || cleanOldAddress.includes('Vila Lucy') || !parsed.address) ? STORE_CONFIG.address : parsed.address;
+        const phone = (cleanOldPhone === '(15) 99123-4567' || !parsed.phone) ? STORE_CONFIG.phone : parsed.phone;
+ 
         return {
           name: parsed.name ?? STORE_CONFIG.name,
           shortName: parsed.shortName ?? STORE_CONFIG.shortName,
@@ -118,7 +128,29 @@ export default function App() {
           printerShowAddress: parsed.printerShowAddress ?? true,
           printerHeaderMessage: parsed.printerHeaderMessage ?? "Comprovante de Pedido",
           printerFooterMessage: parsed.printerFooterMessage ?? "Muito obrigado pela preferência!",
-          instagram: parsed.instagram ?? STORE_CONFIG.instagram
+          instagram: (!parsed.instagram || parsed.instagram === '@sorveteriagourmetsupreme') ? STORE_CONFIG.instagram : parsed.instagram,
+          customDomain: parsed.customDomain ?? STORE_CONFIG.customDomain,
+          pixKey: parsed.pixKey ?? 'contato@sorveteriasupreme.com.br',
+          pixReceiverName: parsed.pixReceiverName ?? 'Sorveteria Gourmet Supreme',
+          pixReceiverCity: parsed.pixReceiverCity ?? 'Monte Mor',
+          pixKeyType: parsed.pixKeyType ?? 'email',
+          paymentPixEnabled: parsed.paymentPixEnabled ?? true,
+          paymentCardEnabled: parsed.paymentCardEnabled ?? true,
+          paymentCashDeliveryEnabled: parsed.paymentCashDeliveryEnabled ?? true,
+          paymentCardDeliveryEnabled: parsed.paymentCardDeliveryEnabled ?? true,
+          pagseguroEnabled: parsed.pagseguroEnabled ?? false,
+          pagseguroEmail: parsed.pagseguroEmail ?? '',
+          pagseguroToken: parsed.pagseguroToken ?? '',
+          pagseguroEnvironment: parsed.pagseguroEnvironment ?? 'sandbox',
+          deliveryFees: parsed.deliveryFees ?? [
+            { neighborhood: 'Centro', fee: 5.00 },
+            { neighborhood: 'Jardim Alvorada', fee: 6.00 },
+            { neighborhood: 'Jardim Paulista', fee: 7.00 },
+            { neighborhood: 'Parque Indaiá', fee: 8.00 },
+            { neighborhood: 'Jardim São Clemente', fee: 7.00 },
+            { neighborhood: 'Jardim Moreira', fee: 6.50 },
+            { neighborhood: 'Jardim Colina', fee: 6.00 }
+          ]
         };
       } catch (e) {
         console.error('Error parsing store settings', e);
@@ -136,17 +168,60 @@ export default function App() {
       printerShowAddress: true,
       printerHeaderMessage: "Comprovante de Pedido",
       printerFooterMessage: "Muito obrigado pela preferência!",
+      pixKey: 'contato@sorveteriasupreme.com.br',
+      pixReceiverName: 'Sorveteria Gourmet Supreme',
+      pixReceiverCity: 'Monte Mor',
+      pixKeyType: 'email',
+      paymentPixEnabled: true,
+      paymentCardEnabled: true,
+      paymentCashDeliveryEnabled: true,
+      paymentCardDeliveryEnabled: true,
+      pagseguroEnabled: false,
+      pagseguroEmail: '',
+      pagseguroToken: '',
+      pagseguroEnvironment: 'sandbox' as 'sandbox' | 'production',
+      deliveryFees: [
+        { neighborhood: 'Centro', fee: 5.00 },
+        { neighborhood: 'Jardim Alvorada', fee: 6.00 },
+        { neighborhood: 'Jardim Paulista', fee: 7.00 },
+        { neighborhood: 'Parque Indaiá', fee: 8.00 },
+        { neighborhood: 'Jardim São Clemente', fee: 7.00 },
+        { neighborhood: 'Jardim Moreira', fee: 6.50 },
+        { neighborhood: 'Jardim Colina', fee: 6.00 }
+      ]
     };
   });
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [saveErrorMessage, setSaveErrorMessage] = useState('');
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'share' | 'general' | 'payments' | 'timing' | 'delivery' | 'printer' | 'advanced'>('share');
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [showShareQrModal, setShowShareQrModal] = useState(false);
+  const [isCustomInstallModalOpen, setIsCustomInstallModalOpen] = useState(false);
 
   const isDevUrl = useMemo(() => {
     return window.location.hostname.includes('ais-dev-');
   }, []);
+
+  const getPublicShareUrl = () => {
+    const currentUrl = window.location.href;
+    if (currentUrl.includes('ais-dev-')) {
+      return currentUrl.replace('ais-dev-', 'ais-pre-');
+    }
+    return currentUrl;
+  };
+
+  const [copiedLink, setCopiedLink] = useState(false);
+  const copyAppUrl = () => {
+    const publicUrl = getPublicShareUrl();
+    navigator.clipboard.writeText(publicUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 3000);
+  };
 
   // Helper to handle and format Firebase auth errors beautifully in Portuguese
   const handleAuthError = (err: any) => {
@@ -188,6 +263,27 @@ export default function App() {
   const handleSignInAuto = async () => {
     setIsAuthModalOpen(true);
   };
+
+  // Listen to PWA installation prompts
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBanner(true);
+      console.log('⚡ beforeinstallprompt capturado com sucesso!');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    // If app is already installed/standalone, log it
+    if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone) {
+      console.log('📱 App já está rodando de forma autônoma (PWA instalada).');
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
 
   // Listen for redirect results on mount (Google Sign-In page callback)
   useEffect(() => {
@@ -243,6 +339,23 @@ export default function App() {
           printerShowAddress: data.printerShowAddress ?? prev.printerShowAddress,
           printerHeaderMessage: data.printerHeaderMessage ?? prev.printerHeaderMessage,
           printerFooterMessage: data.printerFooterMessage ?? prev.printerFooterMessage,
+          deliveryFees: data.deliveryFees ?? prev.deliveryFees,
+          customDomain: data.customDomain ?? prev.customDomain,
+          instagram: (!data.instagram || data.instagram === '@sorveteriagourmetsupreme') 
+            ? (prev.instagram === '@sorveteriagourmetsupreme' || !prev.instagram ? '@sorveteria.supreme' : prev.instagram) 
+            : data.instagram,
+          pixKey: data.pixKey ?? prev.pixKey,
+          pixReceiverName: data.pixReceiverName ?? prev.pixReceiverName,
+          pixReceiverCity: data.pixReceiverCity ?? prev.pixReceiverCity,
+          pixKeyType: data.pixKeyType ?? prev.pixKeyType,
+          paymentPixEnabled: data.paymentPixEnabled ?? prev.paymentPixEnabled,
+          paymentCardEnabled: data.paymentCardEnabled ?? prev.paymentCardEnabled,
+          paymentCashDeliveryEnabled: data.paymentCashDeliveryEnabled ?? prev.paymentCashDeliveryEnabled,
+          paymentCardDeliveryEnabled: data.paymentCardDeliveryEnabled ?? prev.paymentCardDeliveryEnabled,
+          pagseguroEnabled: data.pagseguroEnabled ?? prev.pagseguroEnabled,
+          pagseguroEmail: data.pagseguroEmail ?? prev.pagseguroEmail,
+          pagseguroToken: data.pagseguroToken ?? prev.pagseguroToken,
+          pagseguroEnvironment: data.pagseguroEnvironment ?? prev.pagseguroEnvironment,
         }));
       }
     }, (error) => {
@@ -275,35 +388,33 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // 2c. Seed default menu items if db is empty (for admin)
+  // 2c. Seed default menu items if db is empty (for any authenticated preview/owner session)
   useEffect(() => {
     const seedMenuIfEmpty = async () => {
-      if (currentUser?.email === 'brfariarm@gmail.com') {
-        try {
-          const snap = await getDocs(collection(db, 'menu_items'));
-          if (snap.empty) {
-            console.log('Database menu_items is empty. Seeding default items...');
-            const batch = writeBatch(db);
-            MENU_ITEMS.forEach((item, idx) => {
-              const itemRef = doc(db, 'menu_items', item.id);
-              batch.set(itemRef, {
-                name: item.name,
-                description: item.description,
-                price: item.price,
-                category: item.category,
-                image: item.image,
-                popular: !!item.popular,
-                customizable: !!item.customizable,
-                tags: item.tags || null,
-                index: idx
-              });
+      try {
+        const snap = await getDocs(collection(db, 'menu_items'));
+        if (snap.empty) {
+          console.log('Database menu_items is empty. Seeding default items...');
+          const batch = writeBatch(db);
+          MENU_ITEMS.forEach((item, idx) => {
+            const itemRef = doc(db, 'menu_items', item.id);
+            batch.set(itemRef, {
+              name: item.name,
+              description: item.description,
+              price: item.price,
+              category: item.category,
+              image: item.image,
+              popular: !!item.popular,
+              customizable: !!item.customizable,
+              tags: item.tags || null,
+              index: idx
             });
-            await batch.commit();
-            console.log('Cohesive seeding of dynamic menu items completed!');
-          }
-        } catch (e) {
-          console.error("Error seeding default menu_items collection:", e);
+          });
+          await batch.commit();
+          console.log('Cohesive seeding of dynamic menu items completed!');
         }
+      } catch (e) {
+        console.error("Error seeding default menu_items collection:", e);
       }
     };
     if (currentUser) {
@@ -345,7 +456,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'menu' | 'tracker'>('menu');
   const [isPrinterConfigOpen, setIsPrinterConfigOpen] = useState(false);
   const [isSoundEnabled, setIsSoundEnabled] = useState(true);
-  const [adminSubTab, setAdminSubTab] = useState<'orders' | 'pdv' | 'fechamento' | 'impressora' | 'cardapio' | 'playstore'>('orders');
+  const [adminSubTab, setAdminSubTab] = useState<'orders' | 'pdv' | 'fechamento' | 'impressora' | 'cardapio' | 'playstore' | 'whatsapp'>('orders');
   const [isRingingLoop, setIsRingingLoop] = useState(false);
   const [visualNotifications, setVisualNotifications] = useState<VisualNotification[]>([]);
   const [autoPrintOnNew, setAutoPrintOnNew] = useState(() => {
@@ -353,6 +464,9 @@ export default function App() {
   });
   const [autoPrintOnPrep, setAutoPrintOnPrep] = useState(() => {
     return localStorage.getItem('auto_print_on_prep') === 'true';
+  });
+  const [autoSendWhatsAppStatus, setAutoSendWhatsAppStatus] = useState(() => {
+    return localStorage.getItem('auto_send_whatsapp_status') !== 'false'; // Defaults to true
   });
 
   useEffect(() => {
@@ -362,6 +476,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('auto_print_on_prep', String(autoPrintOnPrep));
   }, [autoPrintOnPrep]);
+
+  useEffect(() => {
+    localStorage.setItem('auto_send_whatsapp_status', String(autoSendWhatsAppStatus));
+  }, [autoSendWhatsAppStatus]);
 
   const playNotificationSound = () => {
     if (!isSoundEnabled) return;
@@ -918,6 +1036,16 @@ export default function App() {
     else if (activeTrackingOrder.status === 'preparing') nextStatus = 'delivering';
     else if (activeTrackingOrder.status === 'delivering') nextStatus = 'completed';
 
+    // Auto send WhatsApp status notification if configured
+    if (autoSendWhatsAppStatus) {
+      try {
+        const url = getWhatsAppStatusUrl(activeTrackingOrder, nextStatus);
+        window.open(url, '_blank');
+      } catch (e) {
+        console.error("Failed to auto open WhatsApp status on simulator click:", e);
+      }
+    }
+
     if (currentUser) {
       try {
         await updateDoc(doc(db, 'orders', activeTrackingOrder.id), {
@@ -954,6 +1082,17 @@ export default function App() {
   // Handle manually updating status of any general order from the list
   const handleUpdateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
     const targetOrder = orders.find(o => o.id === orderId);
+
+    // Auto send WhatsApp status notification if configured
+    if (targetOrder && autoSendWhatsAppStatus) {
+      try {
+        const url = getWhatsAppStatusUrl(targetOrder, newStatus);
+        window.open(url, '_blank');
+      } catch (e) {
+        console.error("Failed to auto open WhatsApp status:", e);
+      }
+    }
+
     if (currentUser) {
       try {
         await updateDoc(doc(db, 'orders', orderId), {
@@ -1049,6 +1188,7 @@ export default function App() {
 
   const handleSaveStoreSettingsToFirestore = async (settings: typeof storeSettings) => {
     if (currentUser?.email === 'brfariarm@gmail.com') {
+      setSaveStatus('saving');
       try {
         await setDoc(doc(db, 'settings', 'store_config'), {
           name: settings.name || '',
@@ -1067,11 +1207,31 @@ export default function App() {
           printerShowAddress: settings.printerShowAddress !== false,
           printerHeaderMessage: settings.printerHeaderMessage || "Comprovante de Pedido",
           printerFooterMessage: settings.printerFooterMessage || "Muito obrigado pela preferência!",
+          deliveryFees: settings.deliveryFees || [],
+          customDomain: settings.customDomain || '',
+          instagram: settings.instagram || '@sorveteria.supreme',
+          pixKey: settings.pixKey || 'contato@sorveteriasupreme.com.br',
+          pixReceiverName: settings.pixReceiverName || 'Sorveteria Gourmet Supreme',
+          pixReceiverCity: settings.pixReceiverCity || 'Monte Mor',
+          pixKeyType: settings.pixKeyType || 'email',
+          paymentPixEnabled: settings.paymentPixEnabled !== false,
+          paymentCardEnabled: settings.paymentCardEnabled !== false,
+          paymentCashDeliveryEnabled: settings.paymentCashDeliveryEnabled !== false,
+          paymentCardDeliveryEnabled: settings.paymentCardDeliveryEnabled !== false,
+          pagseguroEnabled: settings.pagseguroEnabled || false,
+          pagseguroEmail: settings.pagseguroEmail || '',
+          pagseguroToken: settings.pagseguroToken || '',
+          pagseguroEnvironment: settings.pagseguroEnvironment || 'sandbox',
           updatedAt: serverTimestamp()
         });
         console.log("Settings synced successfully to Firestore!");
+        setSaveStatus('success');
+        setTimeout(() => setSaveStatus('idle'), 4000);
       } catch (e) {
         console.error('Failed to sync settings to Firestore:', e);
+        setSaveStatus('error');
+        setSaveErrorMessage(e instanceof Error ? e.message : String(e));
+        setTimeout(() => setSaveStatus('idle'), 8000);
       }
     }
   };
@@ -1081,7 +1241,11 @@ export default function App() {
     const orderIdShort = order.id.slice(-6).toUpperCase();
     const customerName = order.details?.customerName || 'Cliente';
     const shopName = storeSettings.shortName;
-    const trackingLink = `${window.location.origin}?track=${order.id}`;
+    const rawDomain = storeSettings.customDomain ? storeSettings.customDomain.trim() : '';
+    const cleanDomain = rawDomain 
+      ? (rawDomain.startsWith('http') ? rawDomain : `https://${rawDomain}`) 
+      : window.location.origin;
+    const trackingLink = `${cleanDomain}?track=${order.id}`;
 
     switch (status) {
       case 'waiting':
@@ -1091,7 +1255,7 @@ export default function App() {
       case 'delivering':
         return `Olá, ${customerName}! Seu delicioso açaí/sorvete do pedido #${orderIdShort} na ${shopName} já foi montado com sucesso e está a caminho do seu endereço com o motoboy! 🛵 Prepare-se para se refrescar!\n\nAcompanhe a entrega em tempo real:\n${trackingLink}`;
       case 'completed':
-        return `Olá, ${customerName}! Seu pedido #${orderIdShort} na ${shopName} foi entregue com sucesso! 🎉 Esperamos que você ame o nosso açaí gourmet e sorvetes premium. Se puder, nos divulgue no Instagram @sorveteriagourmetsupreme! Obrigado pela preferência e até a próxima! 🍦\n\nDetalhes do seu pedido finalizado:\n${trackingLink}`;
+        return `Olá, ${customerName}! Seu pedido #${orderIdShort} na ${shopName} foi entregue com sucesso! 🎉 Esperamos que você ame o nosso açaí gourmet e sorvetes premium. Se puder, nos divulgue no Instagram @sorveteria.supreme! Obrigado pela preferência e até a próxima! 🍦\n\nDetalhes do seu pedido finalizado:\n${trackingLink}`;
       default:
         return '';
     }
@@ -1185,10 +1349,82 @@ export default function App() {
   // Handle Checkout finish & saving order
   const handlePlaceOrder = async (details: CheckoutDetails) => {
     const orderId = `ord-${Date.now()}`;
+    
+    const cleanCep = details.address.cep ? details.address.cep.replace(/\D/g, '') : '';
+    let selectedNeighborhoodObj = undefined;
+
+    console.log("=== 🔍 INICIANDO DIAGNÓSTICO DE VALIDAÇÃO DE CEP NO PEDIDO ===");
+    console.log(`- ID do Pedido: ${orderId}`);
+    console.log(`- CEP Digitado pelo Cliente: "${details.address.cep}" (Limpo: "${cleanCep}", Dígitos: ${cleanCep.length})`);
+    console.log(`- Bairro Digitado pelo Cliente: "${details.address.neighborhood}"`);
+    console.log(`- Regras de entrega registradas no Firestore:`, storeSettings.deliveryFees || []);
+
+    if (cleanCep && cleanCep.length === 8 && storeSettings.deliveryFees) {
+      console.log("➡️ Etapa 1: Buscando correspondência por CEP Exato...");
+      selectedNeighborhoodObj = storeSettings.deliveryFees.find((df: any) => {
+        if (!df.exactCep) return false;
+        const exactClean = df.exactCep.replace(/\D/g, '');
+        const isMatch = exactClean === cleanCep;
+        console.log(`   - Testando CEP Exato: DB "${df.exactCep}" (${exactClean}) contra Cliente "${cleanCep}" | Match: ${isMatch}`);
+        return isMatch;
+      });
+
+      if (selectedNeighborhoodObj) {
+        console.log(`🎉 Sucesso na Etapa 1! CEP Exato correspondido para o Bairro: "${selectedNeighborhoodObj.neighborhood}" (Taxa: R$ ${selectedNeighborhoodObj.fee})`);
+      } else {
+        console.log("➡️ Etapa 2: CEP Exato não encontrado. Buscando correspondência em Lotes/Faixas de CEP...");
+        selectedNeighborhoodObj = storeSettings.deliveryFees.find((df: any) => {
+          const startStr = (df.cepStart || '').replace(/\D/g, '').padEnd(8, '0');
+          const endStr = (df.cepEnd || '').replace(/\D/g, '').padEnd(8, '9');
+          if (!startStr || !endStr || startStr.length < 5 || endStr.length < 5) {
+            console.log(`   - Ignorando regra de CEP em "${df.neighborhood}" porque cepStart ou cepEnd estão com comprimento incorreto.`);
+            return false;
+          }
+          const clientNum = parseInt(cleanCep, 10);
+          const startNum = parseInt(startStr, 10);
+          const endNum = parseInt(endStr, 10);
+
+          const isMatch = !isNaN(clientNum) && !isNaN(startNum) && !isNaN(endNum) && clientNum >= startNum && clientNum <= endNum;
+          console.log(`   - Testando Faixa de CEP [Bairro: ${df.neighborhood}]: DB De "${df.cepStart}" (${startStr}) até "${df.cepEnd}" (${endStr}) contra Cliente "${cleanCep}" | Match: ${isMatch}`);
+          return isMatch;
+        });
+
+        if (selectedNeighborhoodObj) {
+          console.log(`🎉 Sucesso na Etapa 2! Faixa/Lote de CEP correspondida para o Bairro: "${selectedNeighborhoodObj.neighborhood}" (Taxa: R$ ${selectedNeighborhoodObj.fee})`);
+        } else {
+          console.log("❌ Nenhuma regra de CEP exato ou faixa foi correspondida.");
+        }
+      }
+    }
+
+    if (!selectedNeighborhoodObj && storeSettings.deliveryFees) {
+      console.log("➡️ Etapa 3: Buscando correspondência pelo nome do Bairro...");
+      selectedNeighborhoodObj = storeSettings.deliveryFees.find((item: any) => {
+        const itemBairro = (item.neighborhood || '').trim().toLowerCase();
+        const clientBairro = (details.address.neighborhood || '').trim().toLowerCase();
+        const isMatch = itemBairro === clientBairro;
+        console.log(`   - Testando Nome do Bairro: DB "${item.neighborhood}" contra Cliente "${details.address.neighborhood}" | Match: ${isMatch}`);
+        return isMatch;
+      });
+
+      if (selectedNeighborhoodObj) {
+        console.log(`🎉 Sucesso na Etapa 3! Nome do Bairro correspondido: "${selectedNeighborhoodObj.neighborhood}" (Taxa: R$ ${selectedNeighborhoodObj.fee})`);
+      } else {
+        console.log("❌ Nenhuma regra de Nome de Bairro correspondida.");
+      }
+    }
+
+    const resolvedDeliveryFee = details.deliveryType === 'delivery'
+      ? (selectedNeighborhoodObj ? selectedNeighborhoodObj.fee : 5.00)
+      : 0.00;
+
+    console.log(`- Taxa de Entrega Resolvida: R$ ${resolvedDeliveryFee.toFixed(2)} (${selectedNeighborhoodObj ? `Bairro: ${selectedNeighborhoodObj.neighborhood}` : 'Usando taxa padrão R$ 5,00'})`);
+    console.log("=== 🔚 FIM DIAGNÓSTICO DE VALIDAÇÃO DE CEP ===");
+
     const newOrder: Order = {
       id: orderId,
       items: cart,
-      total: cartSubtotal + (details.deliveryType === 'delivery' ? 5.00 : 0.00),
+      total: cartSubtotal + resolvedDeliveryFee,
       details,
       status: 'waiting',
       timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
@@ -1322,41 +1558,73 @@ export default function App() {
               onClick={() => {
                 setActiveTab('menu');
                 setActiveTrackingOrder(null);
+                setIsCustomInstallModalOpen(true);
               }}
               className="w-12 h-12 flex items-center justify-center transition-transform duration-300 hover:scale-110 cursor-pointer"
+              title="Deseja adicionar Sorveteria Supreme em sua tela inicial? Clique para instalar!"
             >
-              <SupremeLogo size={48} className="w-full h-full" />
+              <SupremeLogo size={48} className="w-full h-full animate-[pulse_6s_infinite]" />
             </div>
             {currentUser?.email === 'brfariarm@gmail.com' ? (
-              <div 
-                onClick={() => setIsSettingsOpen(true)}
-                className="group cursor-pointer select-none p-1.5 rounded-2xl hover:bg-rose-50/60 transition-colors"
-                title="Configurar Horário e Informações da Loja"
-              >
-                <h1 className="text-xl font-black tracking-tight text-rose-600 uppercase flex items-center gap-1 leading-none group-hover:text-rose-700 transition-colors">
-                  {storeSettings.shortName.split(' ')[0]} <span className="text-gray-450 font-light italic lowercase text-[15px]">{storeSettings.shortName.split(' ').slice(1).join(' ')}</span>
-                  <Settings className="w-3.5 h-3.5 text-slate-400 opacity-60 group-hover:opacity-100 group-hover:rotate-45 transition-all inline-block ml-1" />
-                </h1>
-                <div className="flex items-center gap-1.5 mt-1">
-                  <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isOpen ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                  <span className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1 ${isOpen ? 'text-emerald-600 font-extrabold' : 'text-rose-500 font-semibold'}`}>
-                    {isOpen ? 'Aberto' : 'Fechado'} • {storeSettings.city}
-                    <span className="text-slate-400 font-normal tracking-normal text-[9px] lowercase">({storeSettings.openTime} às {storeSettings.closeTime})</span>
-                  </span>
+              <div className="flex items-center gap-3">
+                <div 
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="group cursor-pointer select-none p-1.5 rounded-2xl hover:bg-rose-50/65 transition-colors"
+                  title="Configurar Horário, Taxas, Impressora e QR Code"
+                >
+                  <h1 className="text-xl font-black tracking-tight text-rose-600 uppercase flex items-center gap-1 leading-none group-hover:text-rose-750 transition-colors">
+                    {storeSettings.shortName.split(' ')[0]} <span className="text-slate-450 font-light italic lowercase text-[15px]">{storeSettings.shortName.split(' ').slice(1).join(' ')}</span>
+                    <Settings className="w-3.5 h-3.5 text-slate-400 opacity-60 group-hover:opacity-100 group-hover:rotate-45 transition-all inline-block ml-1" />
+                  </h1>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isOpen ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                    <span className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1 ${isOpen ? 'text-emerald-600' : 'text-rose-500 font-semibold'}`}>
+                      {isOpen ? 'Aberto' : 'Fechado'} • {storeSettings.city}
+                      <span className="text-slate-400 font-normal tracking-normal text-[9px] lowercase">({storeSettings.openTime} às {storeSettings.closeTime})</span>
+                    </span>
+                  </div>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="bg-rose-50 border border-rose-100 hover:bg-rose-100 text-rose-600 font-extrabold text-[10px] uppercase tracking-widest px-3 py-1.5 sm:px-4 sm:py-2.5 rounded-2xl transition-all shadow-xs cursor-pointer flex items-center gap-2"
+                  title="Painel de Controle Unificado (Impressora, Horários, Taxas, QR Code)"
+                >
+                  <Settings className="w-4 h-4 text-rose-500 animate-[spin_10s_linear_infinite]" />
+                  <span className="hidden xs:inline">Configurações</span>
+                  <span className="xs:hidden">Painel</span>
+                  <span className="bg-rose-500 text-white rounded-full text-[8px] px-1.5 py-0.5 font-bold animate-pulse">Admin</span>
+                </button>
               </div>
             ) : (
-              <div className="select-none p-1.5 rounded-2xl">
-                <h1 className="text-xl font-black tracking-tight text-rose-600 uppercase flex items-center gap-1 leading-none">
-                  {storeSettings.shortName.split(' ')[0]} <span className="text-gray-450 font-light italic lowercase text-[15px]">{storeSettings.shortName.split(' ').slice(1).join(' ')}</span>
-                </h1>
-                <div className="flex items-center gap-1.5 mt-1">
-                  <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isOpen ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                  <span className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1 ${isOpen ? 'text-emerald-600 font-extrabold' : 'text-rose-500 font-semibold'}`}>
-                    {isOpen ? 'Aberto' : 'Fechado'} • {storeSettings.city}
-                    <span className="text-slate-400 font-normal tracking-normal text-[9px] lowercase">({storeSettings.openTime} às {storeSettings.closeTime})</span>
-                  </span>
+              <div className="select-none p-1.5 rounded-2xl flex items-center gap-2.5">
+                <div 
+                  onClick={() => setIsCustomInstallModalOpen(true)}
+                  className="cursor-pointer group"
+                  title="Quer adicionar o app à sua tela inicial? Clique aqui!"
+                >
+                  <h1 className="text-xl font-black tracking-tight text-rose-600 uppercase flex items-center gap-1 leading-none group-hover:text-rose-700 transition-colors">
+                    {storeSettings.shortName.split(' ')[0]} <span className="text-gray-450 font-light italic lowercase text-[15px]">{storeSettings.shortName.split(' ').slice(1).join(' ')}</span>
+                  </h1>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isOpen ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                    <span className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1 ${isOpen ? 'text-emerald-600 font-extrabold' : 'text-rose-500 font-semibold'} group-hover:text-rose-600 transition-colors`}>
+                      {isOpen ? 'Aberto' : 'Fechado'} • {storeSettings.city}
+                      <span className="text-slate-400 font-normal tracking-normal text-[9px] lowercase">({storeSettings.openTime} às {storeSettings.closeTime})</span>
+                    </span>
+                  </div>
                 </div>
+                {/* Visual pulse indicator to add to homescreen */}
+                <button
+                  type="button"
+                  onClick={() => setIsCustomInstallModalOpen(true)}
+                  className="bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 hover:scale-110 text-white p-1.5 px-2.5 rounded-full transition-all text-[9px] font-black uppercase tracking-widest cursor-pointer shadow-xs active:scale-95 flex items-center gap-1 animate-[bounce_3s_infinite]"
+                  title="Adicionar o App à sua tela inicial"
+                >
+                  <span className="text-[10px]">📲</span>
+                  <span className="hidden xs:inline">Instalar</span>
+                </button>
               </div>
             )}
           </div>
@@ -1637,6 +1905,38 @@ export default function App() {
                   </div>
                 </div>
 
+
+
+                {/* Instagram Quick Follow Banner */}
+                <div className="bg-gradient-to-tr from-purple-600 via-pink-550 to-orange-500 text-white rounded-[24px] p-5 shadow-md flex flex-col gap-3.5 text-left mt-1.5 relative overflow-hidden">
+                  <div className="absolute top-[10px] right-[10px] w-20 h-20 bg-white/10 rounded-full blur-lg" />
+                  <div>
+                    <span className="bg-white/20 text-white font-black text-[8px] tracking-widest px-2.5 py-0.5 rounded-full uppercase">
+                      Instagram Oficial 📸
+                    </span>
+                    <h4 className="text-[13px] font-black uppercase tracking-tight mt-1.5 text-white leading-snug">
+                      SIGA A SUPREME!
+                    </h4>
+                    <p className="text-[10px] text-white/90 font-semibold leading-relaxed mt-1">
+                      Acompanhe novidades, descontos e fotos deliciosas em primeira mão de nosso açaí gourmet.
+                    </p>
+                  </div>
+
+                  <a
+                    href={`https://instagram.com/${storeSettings.instagram.replace('@', '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full bg-white hover:bg-slate-50 text-purple-700 active:scale-[0.98] font-black text-[9px] tracking-widest uppercase py-3 rounded-xl transition-all shadow-md text-center cursor-pointer flex items-center justify-center gap-1.5 border border-white hover:scale-[1.02]"
+                  >
+                    <Instagram className="w-4 h-4 text-pink-550 animate-[pulse_2s_infinite]" /> {storeSettings.instagram}
+                  </a>
+
+                  <div className="border-t border-white/20 pt-2.5 flex items-center justify-between text-[8px] text-white/80 font-bold uppercase">
+                    <span>🔥 Promoções semanais</span>
+                    <span>•</span>
+                    <span>Poste seu copo e marque-nos!</span>
+                  </div>
+                </div>
 
               </aside>
 
@@ -1958,20 +2258,35 @@ export default function App() {
                           🥣 Cardápio
                         </button>
                         <button
-                          onClick={() => setAdminSubTab('playstore')}
-                          className={`flex-1 min-w-[120px] flex items-center justify-center gap-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
-                            adminSubTab === 'playstore'
+                          onClick={() => setAdminSubTab('whatsapp')}
+                          className={`flex-1 min-w-[125px] flex items-center justify-center gap-2 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                            adminSubTab === 'whatsapp'
                               ? 'bg-white text-rose-650 shadow-sm'
                               : 'text-slate-500 hover:text-slate-850'
                           }`}
                         >
-                          📱 Play Store
+                          💬 WhatsApp Bot
+                        </button>
+                        <button
+                          onClick={() => setAdminSubTab('playstore')}
+                          className={`flex-1 min-w-[130px] flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-[10px] font-extrabold uppercase tracking-wider transition-all cursor-pointer relative overflow-hidden group select-none ${
+                            adminSubTab === 'playstore'
+                              ? 'bg-gradient-to-r from-teal-500 via-blue-500 to-indigo-600 text-white shadow-md shadow-blue-200/50 scale-102 font-black border-none'
+                              : 'bg-emerald-50/50 hover:bg-emerald-50 text-emerald-800 border border-emerald-100/60 hover:text-emerald-950 font-bold'
+                          }`}
+                        >
+                          <span className="flex items-center gap-1.5 z-10">
+                            <span className="text-xs group-hover:animate-bounce">🤖</span> App Play Store
+                            {adminSubTab !== 'playstore' && (
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse border border-white" />
+                            )}
+                          </span>
                         </button>
                       </div>
 
                     {/* Conditional rendering for PDV versus Normal Desktop workflow */}
                     {adminSubTab === 'pdv' ? (
-                      <AdminPDV onPlacePDVOrder={handlePlacePDVOrder} storeSettings={storeSettings} menuItems={menuItems} />
+                      <AdminPDV onPlacePDVOrder={handlePlacePDVOrder} storeSettings={storeSettings} menuItems={menuItems} onClose={() => setAdminSubTab('orders')} />
                     ) : adminSubTab === 'fechamento' ? (
                       <AdminFechamento 
                         orders={orders} 
@@ -1992,9 +2307,21 @@ export default function App() {
                         setAutoPrintOnNew={setAutoPrintOnNew} 
                         autoPrintOnPrep={autoPrintOnPrep} 
                         setAutoPrintOnPrep={setAutoPrintOnPrep} 
+                        autoSendWhatsAppStatus={autoSendWhatsAppStatus}
+                        setAutoSendWhatsAppStatus={setAutoSendWhatsAppStatus}
                       />
                     ) : adminSubTab === 'cardapio' ? (
                       <AdminCardapio menuItems={menuItems} />
+                    ) : adminSubTab === 'whatsapp' ? (
+                      <AdminWhatsAppBot 
+                        storeSettings={storeSettings} 
+                        onUpdateSettings={async (updated) => {
+                          setStoreSettings(updated);
+                          await handleSaveStoreSettingsToFirestore(updated);
+                        }} 
+                        menuItems={menuItems} 
+                        orders={orders} 
+                      />
                     ) : adminSubTab === 'playstore' ? (
                       <PlayStoreMobileHub />
                     ) : (
@@ -2577,20 +2904,24 @@ export default function App() {
       <footer className="bg-slate-900 text-white/80 py-8 border-t border-slate-800 text-xs flex-shrink-0 mt-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 border-b border-white/5 pb-6">
-            <div className="flex items-center gap-3.5">
-              <SupremeLogo size={42} />
+            <div className="flex items-center gap-3.5 select-none">
+              <div 
+                onClick={() => setIsCustomInstallModalOpen(true)}
+                className="transition-transform duration-300 hover:scale-110 cursor-pointer active:scale-95"
+                title="Deseja adicionar Sorveteria Supreme em sua tela inicial? Clique para instalar!"
+              >
+                <SupremeLogo size={42} />
+              </div>
               <div className="space-y-0.5">
-                <h4 className="text-base font-bold font-display text-white">{storeSettings.name}</h4>
+                <h4 className="text-base font-bold font-display text-white">
+                  {storeSettings.name}
+                </h4>
                 <p className="text-[11px] text-white/50">O sabor supremo do açaí gourmet, taças deliciosas e sorvetes premium.</p>
               </div>
             </div>
             
             {/* Quick social references */}
-            <div className="flex gap-4 flex-wrap">
-              <div className="flex items-center gap-1.5">
-                <Phone className="w-4 h-4 text-rose-500" />
-                <span className="font-semibold">{storeSettings.phone}</span>
-              </div>
+            <div className="flex gap-4 items-center flex-wrap">
               <div className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors" onClick={() => setIsSettingsOpen(true)} title="Clique para editar endereço">
                 <MapPin className="w-4 h-4 text-rose-500" />
                 <span>{storeSettings.address}</span>
@@ -2599,6 +2930,25 @@ export default function App() {
                 <Clock className="w-4 h-4 text-rose-500" />
                 <span className="font-semibold flex items-center gap-1">Horário: {storeSettings.openTime} - {storeSettings.closeTime}</span>
               </div>
+              <a
+                href={`https://wa.me/55${storeSettings.phone.replace(/\D/g, '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Clique para falar no WhatsApp"
+                className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-500 to-green-600 hover:scale-[1.03] text-white font-extrabold px-3.5 py-1.5 rounded-full transition-all text-[11px] uppercase tracking-wider shrink-0 cursor-pointer shadow-lg active:scale-95"
+              >
+                <MessageCircle className="w-4 h-4 animate-[pulse_2s_infinite]" />
+                <span>Fale no WhatsApp</span>
+              </a>
+              <a 
+                href={`https://instagram.com/${storeSettings.instagram.replace('@', '')}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 bg-gradient-to-r from-pink-500 via-rose-500 to-amber-500 hover:scale-[1.03] text-white font-extrabold px-3.5 py-1.5 rounded-full transition-all text-[11px] uppercase tracking-wider shrink-0 cursor-pointer shadow-lg"
+              >
+                <Instagram className="w-3.5 h-3.5" />
+                <span>Siga-nos no Instagram</span>
+              </a>
             </div>
           </div>
 
@@ -2787,6 +3137,9 @@ export default function App() {
             storeAddress={storeSettings.address}
             currentUser={currentUser}
             onSignIn={handleSignInAuto}
+            deliveryFees={storeSettings.deliveryFees}
+            storePhone={storeSettings.phone}
+            storeSettings={storeSettings}
           />
         )}
       </AnimatePresence>
@@ -3147,7 +3500,7 @@ E-mail: ${storeSettings.email}`;
               </div>
 
               {/* Footer */}
-              <div className="p-4 border-t border-slate-50 bg-slate-50/80 flex justify-end">
+              <div className="p-4 border-t border-slate-50 bg-slate-50/80 flex justify-end flex-shrink-0">
                 <button
                   onClick={() => setIsAuthModalOpen(false)}
                   className="px-5 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 transition-colors cursor-pointer text-xs font-bold"
@@ -3160,12 +3513,10 @@ E-mail: ${storeSettings.email}`;
         )}
       </AnimatePresence>
 
-
-
-      {/* 9. Store Settings Modal */}
+           {/* 9. Store Settings Modal */}
       <AnimatePresence>
         {isSettingsOpen && currentUser?.email === 'brfariarm@gmail.com' && (
-          <div className="fixed inset-0 z-55 overflow-y-auto flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-55 overflow-y-auto flex items-center justify-center p-2 sm:p-4">
             {/* Backdrop */}
             <motion.div 
               initial={{ opacity: 0 }}
@@ -3181,17 +3532,19 @@ E-mail: ${storeSettings.email}`;
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.95, opacity: 0, y: 20 }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="bg-white rounded-3xl max-w-md w-full flex flex-col overflow-hidden shadow-2xl border border-slate-100 relative z-50 font-sans"
+              className="bg-white rounded-3xl max-w-4xl w-full flex flex-col overflow-hidden shadow-2xl border border-slate-100 relative z-50 font-sans h-[82vh]"
             >
               {/* Header */}
-              <div className="p-5 border-b border-rose-50 flex justify-between items-center bg-rose-50/20">
+              <div className="p-5 border-b border-rose-50 flex justify-between items-center bg-rose-50/20 flex-shrink-0">
                 <div className="flex items-center gap-2">
-                  <Settings className="w-5 h-5 text-rose-500 animate-[spin_4s_linear_infinite]" />
+                  <span className="p-1.5 bg-rose-100 rounded-xl text-rose-600 block">
+                    <Settings className="w-5 h-5 animate-[spin_4s_linear_infinite]" />
+                  </span>
                   <div>
                     <h3 className="font-extrabold text-slate-800 text-sm">
-                      Configurações do Estabelecimento
+                      Painel de Controle Supremo
                     </h3>
-                    <p className="text-[10px] text-slate-450 uppercase font-bold tracking-wider">Ajustes locais da simulação</p>
+                    <p className="text-[10px] text-slate-450 uppercase font-black tracking-wider">Configure tudo em um único lugar</p>
                   </div>
                 </div>
                 <button
@@ -3202,451 +3555,967 @@ E-mail: ${storeSettings.email}`;
                 </button>
               </div>
 
-              {/* Form Content */}
-              <div className="p-6 overflow-y-auto space-y-4 text-xs font-semibold text-slate-600 max-h-[70vh]">
-                <div className="space-y-1">
-                  <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Nome Oficial</label>
-                  <input
-                    type="text"
-                    value={storeSettings.name}
-                    onChange={(e) => setStoreSettings({ ...storeSettings, name: e.target.value })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-505 bg-white font-medium"
-                  />
-                </div>
+              {/* Tab headers for Mobile - Swipeable bar */}
+              <div className="flex md:hidden border-b border-rose-50/60 overflow-x-auto whitespace-nowrap p-2 bg-slate-50 gap-1.5 scrollbar-none flex-shrink-0">
+                {[
+                  { id: 'share', label: '📱 Link & QR' },
+                  { id: 'general', label: '🏢 Dados' },
+                  { id: 'payments', label: '💳 Pagamentos' },
+                  { id: 'timing', label: '🕒 Horários' },
+                  { id: 'delivery', label: '🛵 Taxas' },
+                  { id: 'printer', label: '🖨️ Impressora' },
+                  { id: 'advanced', label: '⚙️ Avançado' },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setSettingsTab(tab.id as any)}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      settingsTab === tab.id
+                        ? 'bg-rose-500 text-white shadow-xs'
+                        : 'bg-white border border-slate-100 text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Nome Curto (Header)</label>
-                    <input
-                      type="text"
-                      value={storeSettings.shortName}
-                      onChange={(e) => setStoreSettings({ ...storeSettings, shortName: e.target.value })}
-                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Cidade principal</label>
-                    <input
-                      type="text"
-                      value={storeSettings.city}
-                      onChange={(e) => setStoreSettings({ ...storeSettings, city: e.target.value })}
-                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Endereço de Atendimento</label>
-                  <input
-                    type="text"
-                    value={storeSettings.address}
-                    onChange={(e) => setStoreSettings({ ...storeSettings, address: e.target.value })}
-                    className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Telefone / WhatsApp</label>
-                    <input
-                      type="text"
-                      value={storeSettings.phone}
-                      onChange={(e) => setStoreSettings({ ...storeSettings, phone: e.target.value })}
-                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">E-mail de Contato</label>
-                    <input
-                      type="email"
-                      value={storeSettings.email}
-                      onChange={(e) => setStoreSettings({ ...storeSettings, email: e.target.value })}
-                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium"
-                    />
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t border-slate-100 space-y-3">
-                  <h4 className="text-[11px] font-black text-rose-550 uppercase tracking-widest flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5" /> Horário de Funcionamento
-                  </h4>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Abertura (HH:MM)</label>
-                      <input
-                        type="text"
-                        value={storeSettings.openTime}
-                        placeholder="Ex: 11:00"
-                        onChange={(e) => setStoreSettings({ ...storeSettings, openTime: e.target.value })}
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Fechamento (HH:MM)</label>
-                      <input
-                        type="text"
-                        value={storeSettings.closeTime}
-                        placeholder="Ex: 23:00"
-                        onChange={(e) => setStoreSettings({ ...storeSettings, closeTime: e.target.value })}
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Simulação de Status</label>
-                    <div className="grid grid-cols-3 gap-1.5 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
-                      <button
-                        onClick={() => setStoreSettings({ ...storeSettings, statusOverride: 'auto' })}
-                        className={`text-[10px] font-black py-2 rounded-xl transition-all uppercase ${
-                          storeSettings.statusOverride === 'auto'
-                            ? 'bg-rose-500 text-white shadow-xs'
-                            : 'text-slate-500 hover:text-slate-850 hover:bg-slate-100'
-                        }`}
-                      >
-                        Automático
-                      </button>
-                      <button
-                        onClick={() => setStoreSettings({ ...storeSettings, statusOverride: 'open' })}
-                        className={`text-[10px] font-black py-2 rounded-xl transition-all uppercase ${
-                          storeSettings.statusOverride === 'open'
-                            ? 'bg-emerald-500 text-white shadow-xs'
-                            : 'text-slate-500 hover:text-slate-850 hover:bg-slate-100'
-                        }`}
-                      >
-                        Forçar Aberto
-                      </button>
-                      <button
-                        onClick={() => setStoreSettings({ ...storeSettings, statusOverride: 'closed' })}
-                        className={`text-[10px] font-black py-2 rounded-xl transition-all uppercase ${
-                          storeSettings.statusOverride === 'closed'
-                            ? 'bg-rose-500 text-white shadow-xs'
-                            : 'text-slate-500 hover:text-slate-850 hover:bg-slate-100'
-                        }`}
-                      >
-                        Forçar Fechado
-                      </button>
-                    </div>
-                    <p className="text-[10px] text-slate-450 leading-relaxed font-normal">
-                      <strong>Automático:</strong> Compara a hora local do seu dispositivo com os campos de abertura e fechamento acima.<br />
-                      <strong>Forçar:</strong> Útil para validar o comportamento visual do app aberto ou fechado em qualquer hora do dia.
-                    </p>
-                  </div>
-                </div>
-
-                {/* 9.2 Thermal Printer Settings Section */}
-                <div className="pt-3 border-t border-slate-100 space-y-3">
-                  <h4 className="text-[11px] font-black text-rose-550 uppercase tracking-widest flex items-center gap-1.5">
+              <div className="flex flex-1 overflow-hidden flex-col md:flex-row">
+                {/* Tab Sidebar for Desktop */}
+                <div className="hidden md:flex flex-col w-64 border-r border-slate-100 bg-slate-50/40 p-4 space-y-1.5 flex-shrink-0 text-left">
+                  <span className="text-[9px] font-black text-rose-500/70 tracking-widest uppercase px-3.5 mb-2 block">Menu do Sistema</span>
+                  {[
+                    { id: 'share', icon: <Share2 className="w-4 h-4" />, label: 'QR Code & Link' },
+                    { id: 'general', icon: <Settings className="w-4 h-4" />, label: 'Dados da Loja' },
+                    { id: 'payments', icon: <CreditCard className="w-4 h-4" />, label: 'Pagamentos & Pix' },
+                    { id: 'timing', icon: <Clock className="w-4 h-4" />, label: 'Horários' },
+                    { id: 'delivery', icon: <MapPin className="w-4 h-4" />, label: 'Taxas de Entrega' },
+                    { id: 'printer', icon: <Printer className="w-4 h-4" />, label: 'Impressora' },
+                    { id: 'advanced', icon: <ShieldAlert className="w-4 h-4" />, label: 'Avançado' },
+                  ].map((tab) => (
                     <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        const mockOrder: Order = {
-                          id: 'ord-teste-bobina',
-                          total: 35.00,
-                          status: 'waiting',
-                          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-                          details: {
-                            customerName: 'Ajuste de Bobina / Teste',
-                            customerPhone: '(11) 99999-9999',
-                            deliveryType: 'delivery',
-                            address: {
-                              street: 'Rua do Açaí Supreme',
-                              number: '100',
-                              neighborhood: 'Bairro Gourmet',
-                              city: 'Monte Mor',
-                              reference: 'Próximo à Praça Central'
-                            },
-                            paymentType: 'pix'
-                          },
-                          items: [
-                            {
-                              id: 'item-teste-1',
-                              menuItem: {
-                                id: '1',
-                                name: 'Copo Personalizado Supremo',
-                                description: 'Copo de açaí montado sob medida',
-                                price: 20.00,
-                                category: 'acai' as const,
-                                image: ''
-                              },
-                              isCustomCup: true,
-                              customCupPrice: 20.00,
-                              customCupConfig: {
-                                size: '500ml',
-                                base: 'casadinho',
-                                flavors: ['acai', 'leite_ninho'],
-                                toppings: ['morango', 'leite_condensado', 'kitkat'],
-                              },
-                              quantity: 1,
-                              notes: 'Caprichar no morango!'
-                            },
-                            {
-                              id: 'item-teste-2',
-                              menuItem: {
-                                id: '2',
-                                name: 'Sundae Morango Especial',
-                                description: 'Delicioso sundae com calda caseira de frutas vermelhas',
-                                price: 15.00,
-                                category: 'sundae' as const,
-                                image: ''
-                              },
-                              quantity: 1
-                            }
-                          ]
-                        };
-                        printOrderReceipt(mockOrder, storeSettings);
-                      }}
-                      className="p-1 bg-rose-500/15 hover:bg-rose-500 hover:text-white rounded-lg transition-all border-none cursor-pointer text-rose-650 flex items-center justify-center"
-                      title="Clique aqui para testar a impressora!"
+                      key={tab.id}
+                      onClick={() => setSettingsTab(tab.id as any)}
+                      className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-2xl text-[11px] font-extrabold uppercase tracking-wider transition-all cursor-pointer text-left ${
+                        settingsTab === tab.id
+                          ? 'bg-rose-500 text-white shadow-md shadow-rose-100 font-extrabold translate-x-1'
+                          : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100/60'
+                      }`}
                     >
-                      <Printer className="w-3.5 h-3.5" />
+                      {tab.icon}
+                      {tab.label}
                     </button>
-                    <span>Impressora Térmica</span>
-                  </h4>
+                  ))}
+                </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Largura da Bobina</label>
-                      <select
-                        value={storeSettings.printerPaperWidth || '80mm'}
-                        onChange={(e) => setStoreSettings({ ...storeSettings, printerPaperWidth: e.target.value })}
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium"
-                      >
-                        <option value="80mm">80mm (Mesa / Balcão / USB)</option>
-                        <option value="58mm">58mm (Portátil / Bluetooth)</option>
-                      </select>
+                {/* Active Form Content Block */}
+                <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 text-xs font-semibold text-slate-600">
+                  {settingsTab === 'share' && (
+                    <div className="space-y-4 animate-fadeIn text-left">
+                      <div className="bg-gradient-to-r from-purple-900 to-indigo-950 p-5 rounded-3xl text-white shadow-md relative overflow-hidden">
+                        <div className="absolute top-[-45px] right-[-25px] w-40 h-40 bg-rose-500/10 rounded-full blur-3xl" />
+                        <div className="relative z-10">
+                          <span className="bg-emerald-605 font-black text-[9px] tracking-widest px-2.5 py-1 rounded-full uppercase bg-emerald-600">PWA Conectiva</span>
+                          <h3 className="text-lg font-black mt-2">Link de Rastreio & QR Code</h3>
+                          <p className="text-[11px] text-indigo-100/80 leading-relaxed font-semibold mt-1">
+                            Seus clientes podem fazer pedidos e rastrear as entregas diretamente escaneando este QR Code ou clicando no seu domínio personalizado.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200/60 rounded-3xl p-5 flex flex-col sm:flex-row items-center gap-5 shadow-xs">
+                        <div className="bg-white p-3 rounded-2xl border border-slate-150 shadow-sm flex-shrink-0 flex flex-col items-center gap-1.5">
+                          <img 
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(getPublicShareUrl())}`} 
+                            alt="QR Code Oficial" 
+                            className="w-32 h-32"
+                            referrerPolicy="no-referrer"
+                          />
+                          <span className="text-[8.5px] text-slate-400 font-black uppercase tracking-wider">Escanear Teste</span>
+                        </div>
+                        
+                        <div className="flex-1 space-y-2.5 text-center sm:text-left">
+                          <span className="bg-rose-500/10 text-rose-600 border border-rose-100 font-black text-[8.5px] tracking-wider px-2 py-0.5 rounded-full uppercase select-none">
+                            Link de Compartilhamento Padrão
+                          </span>
+                          <p className="text-[11px] text-slate-500 leading-relaxed font-semibold">
+                            Este QR Code redireciona automaticamente para a experiência do cliente. Você também pode enviá-lo nas suas redes sociais! Referente a:
+                          </p>
+                          <div className="select-all font-mono text-[10.5px] text-rose-600 bg-white border border-slate-150 p-2.5 rounded-xl break-all font-bold">
+                            {getPublicShareUrl()}
+                          </div>
+                          
+                          <button
+                            onClick={copyAppUrl}
+                            className="w-full sm:w-auto bg-rose-500 hover:bg-rose-600 active:scale-98 text-white font-extrabold text-[10px] tracking-widest uppercase px-4 py-2.5 rounded-xl transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer ml-auto sm:ml-0"
+                          >
+                            {copiedLink ? (
+                              <>
+                                <Check className="w-3.5 h-3.5" /> Link Copiado!
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3.5 h-3.5" /> Copiar Link Público
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="bg-amber-50/50 border border-amber-250/55 p-4 rounded-3xl space-y-2">
+                        <span className="text-[10px] text-amber-600 font-black uppercase tracking-wider block">⚠️ Importante para Testar no Celular:</span>
+                        <p className="text-[11px] text-slate-500 leading-relaxed font-semibold">
+                          Para que celulares acessem os dados corretamente sem erros de CORS ou privacidade, certifique-se de habilitar o link do protótipo no botão <strong>"Compartilhar" (Share)</strong> no canto superior direito do Google AI Studio antes de escanear.
+                        </p>
+                      </div>
                     </div>
+                  )}
 
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Vias / Cópias</label>
-                      <select
-                        value={storeSettings.printerNumCopies || 1}
-                        onChange={(e) => setStoreSettings({ ...storeSettings, printerNumCopies: Number(e.target.value) })}
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium"
-                      >
-                        <option value={1}>1 Via (Padrão)</option>
-                        <option value={2}>2 Vias (Cozinha + Entrega)</option>
-                        <option value={3}>3 Vias (Produção + Entrega + Controle)</option>
-                      </select>
+                  {settingsTab === 'general' && (
+                    <div className="space-y-4 animate-fadeIn text-left">
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Nome Oficial do Estabelecimento</label>
+                        <input
+                          type="text"
+                          value={storeSettings.name}
+                          onChange={(e) => setStoreSettings({ ...storeSettings, name: e.target.value })}
+                          className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Nome Curto (Header)</label>
+                          <input
+                            type="text"
+                            value={storeSettings.shortName}
+                            onChange={(e) => setStoreSettings({ ...storeSettings, shortName: e.target.value })}
+                            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Cidade Principal</label>
+                          <input
+                            type="text"
+                            value={storeSettings.city}
+                            onChange={(e) => setStoreSettings({ ...storeSettings, city: e.target.value })}
+                            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Endereço de Atendimento</label>
+                        <input
+                          type="text"
+                          value={storeSettings.address}
+                          onChange={(e) => setStoreSettings({ ...storeSettings, address: e.target.value })}
+                          className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Telefone / WhatsApp Comercial</label>
+                          <input
+                            type="text"
+                            value={storeSettings.phone}
+                            onChange={(e) => setStoreSettings({ ...storeSettings, phone: e.target.value })}
+                            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">E-mail de Contato Comercial</label>
+                          <input
+                            type="email"
+                            value={storeSettings.email}
+                            onChange={(e) => setStoreSettings({ ...storeSettings, email: e.target.value })}
+                            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-black uppercase text-rose-550 tracking-wider">Domínio Personalizado (Link de Rastreio)</label>
+                        <input
+                          type="text"
+                          placeholder="sorveteriasupreme.vercel.app"
+                          value={storeSettings.customDomain || ''}
+                          onChange={(e) => setStoreSettings({ ...storeSettings, customDomain: e.target.value })}
+                          className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-rose-650"
+                        />
+                        <p className="text-[9.5px] text-slate-400 font-semibold mt-0.5">
+                          Os links de status do WhatsApp enviados ao cliente usarão este domínio (ex: <span className="font-extrabold text-rose-600">sorveteriasupreme.vercel.app</span>).
+                        </p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-black uppercase text-rose-550 tracking-wider">Instagram Oficial da Loja</label>
+                        <input
+                          type="text"
+                          placeholder="@sorveteria.supreme"
+                          value={storeSettings.instagram || ''}
+                          onChange={(e) => setStoreSettings({ ...storeSettings, instagram: e.target.value })}
+                          className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                        />
+                        <p className="text-[9.5px] text-slate-400 font-semibold mt-0.5">
+                          Utilizado nos banners de convite ao Instagram e rodapés de status do aplicativo (ex: <span className="font-extrabold text-rose-600">@sorveteria.supreme</span>).
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Tamanho da Fonte</label>
-                      <select
-                        value={storeSettings.printerFontSize || 12}
-                        onChange={(e) => setStoreSettings({ ...storeSettings, printerFontSize: Number(e.target.value) })}
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium"
-                      >
-                        <option value={10}>10px (Compacto / Econômico)</option>
-                        <option value={11}>11px (Pequeno)</option>
-                        <option value={12}>12px (Médio / Ideal)</option>
-                        <option value={14}>14px (Grande / Legível)</option>
-                      </select>
+                  {settingsTab === 'payments' && (
+                    <div className="space-y-4 animate-fadeIn text-left">
+                      <div className="bg-gradient-to-r from-emerald-800 to-teal-950 p-5 rounded-3xl text-white shadow-md relative overflow-hidden">
+                        <div className="absolute top-[-45px] right-[-25px] w-40 h-40 bg-white/10 rounded-full blur-3xl" />
+                        <div className="relative z-10">
+                          <span className="bg-emerald-600/30 border border-emerald-400/30 font-black text-[9px] tracking-widest px-2.5 py-1 rounded-full uppercase">Meios de Pagamento</span>
+                          <h3 className="text-lg font-black mt-2">Configuração de Pix & Cartões</h3>
+                          <p className="text-[11px] text-emerald-100/80 leading-relaxed font-semibold mt-1">
+                            Defina sua chave Pix para recepção direta, configure as opções visíveis no checkout para o cliente e gerencie as taxas/maquininhas.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Pix Key Configuration Card */}
+                      <div className="bg-white p-5 rounded-3xl border border-slate-150 space-y-4">
+                        <h4 className="text-[11px] font-black text-emerald-700 uppercase tracking-widest flex items-center gap-1.5 border-b border-emerald-50 pb-2">
+                          ⚡ Configurações da Chave Pix
+                        </h4>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Chave Pix Comercial</label>
+                            <input
+                              type="text"
+                              value={storeSettings.pixKey || 'contato@sorveteriasupreme.com.br'}
+                              placeholder="Ex: CNPJ, E-mail, Celular ou Chave Aleatória"
+                              onChange={(e) => setStoreSettings({ ...storeSettings, pixKey: e.target.value })}
+                              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white font-medium text-slate-800"
+                            />
+                            <p className="text-[9px] text-slate-400 font-semibold">Usada pelo gerador de QR Code Copia e Cola dinâmico do checkout.</p>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Nome do Beneficiário (Titular)</label>
+                            <input
+                              type="text"
+                              value={storeSettings.pixReceiverName || 'Sorveteria Gourmet Supreme'}
+                              placeholder="Ex: Sorveteria Gourmet Supreme Ltda"
+                              onChange={(e) => setStoreSettings({ ...storeSettings, pixReceiverName: e.target.value })}
+                              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white font-medium text-slate-800"
+                            />
+                            <p className="text-[9px] text-slate-400 font-semibold">Seu nome ou Razão Social que aparece no comprovante do Pix.</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Cidade do Titular</label>
+                            <input
+                              type="text"
+                              value={storeSettings.pixReceiverCity || 'Monte Mor'}
+                              placeholder="Ex: Monte Mor, Campinas, Indaiatuba"
+                              onChange={(e) => setStoreSettings({ ...storeSettings, pixReceiverCity: e.target.value })}
+                              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white font-medium text-slate-800"
+                            />
+                            <p className="text-[9px] text-slate-400 font-semibold">Cidade cadastrada na sua conta bancária (sem acentos, para o padrão Pix).</p>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Tipo de Chave</label>
+                            <select
+                              value={storeSettings.pixKeyType || 'email'}
+                              onChange={(e) => setStoreSettings({ ...storeSettings, pixKeyType: e.target.value })}
+                              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white font-medium text-slate-800"
+                            >
+                              <option value="email">E-mail ✉️</option>
+                              <option value="cnpj">CNPJ 🏢</option>
+                              <option value="cpf">CPF 👤</option>
+                              <option value="phone">Celular (com DDD) 📱</option>
+                              <option value="random">Chave Aleatória (EVP) 🔑</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* PagSeguro Online Payment Integration Card */}
+                      <div className="bg-white p-5 rounded-3xl border border-slate-150 space-y-4">
+                        <h4 className="text-[11px] font-black text-emerald-650 uppercase tracking-widest flex items-center gap-1.5 border-b border-emerald-50 pb-2">
+                          🟢 Integração de Recebimento via PagSeguro (Cartão & Pix)
+                        </h4>
+                        
+                        <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-100/50 space-y-2">
+                          <p className="text-[10.5px] text-emerald-800 leading-relaxed font-bold">
+                            🔒 <strong>Receba direto na sua Conta Bancária:</strong> <br />
+                            Com o PagSeguro integrado, seus clientes realizam pagamentos online com cartão de crédito ou Pix seguro, e o saldo é liberado diretamente no seu saldo do PagSeguro (PagBank).
+                          </p>
+                          <div className="text-[9.5px] text-slate-500 font-semibold space-y-1">
+                            <p><strong>Como configurar?</strong></p>
+                            <ol className="list-decimal pl-4 space-y-0.5">
+                              <li>Acesse o Portal do PagSeguro pelo computador.</li>
+                              <li>Vá em <strong>Minha Conta</strong> &gt; <strong>Integrações</strong> &gt; <strong>Gerar Token</strong>.</li>
+                              <li>Copie o token gerado e cole abaixo, informando também o e-mail cadastrado na sua conta do PagSeguro.</li>
+                            </ol>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-1">
+                          <div className="space-y-1">
+                            <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">
+                              Status da Integração
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer pt-1">
+                              <input 
+                                type="checkbox" 
+                                checked={storeSettings.pagseguroEnabled || false}
+                                onChange={(e) => setStoreSettings({ ...storeSettings, pagseguroEnabled: e.target.checked })}
+                                className="w-5 h-5 text-emerald-650 rounded-md accent-emerald-500 cursor-pointer"
+                              />
+                              <span className="text-xs text-slate-705 font-bold">Ativar Checkout Online</span>
+                            </label>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">
+                              Ambiente do PagSeguro
+                            </label>
+                            <select
+                              value={storeSettings.pagseguroEnvironment || 'sandbox'}
+                              onChange={(e) => setStoreSettings({ ...storeSettings, pagseguroEnvironment: e.target.value as any })}
+                              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white font-medium text-slate-800"
+                            >
+                              <option value="sandbox">Sandbox (Ambiente de Testes) 🧪</option>
+                              <option value="production">Produção (Vendas Reais) 💰</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                          <div className="space-y-1">
+                            <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">
+                              E-mail da Conta PagSeguro
+                            </label>
+                            <input
+                              type="email"
+                              value={storeSettings.pagseguroEmail || ''}
+                              placeholder="exemplo@vendedor.com"
+                              onChange={(e) => setStoreSettings({ ...storeSettings, pagseguroEmail: e.target.value })}
+                              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white font-medium text-slate-800"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">
+                              Token de Integração do Vendedor
+                            </label>
+                            <input
+                              type="password"
+                              value={storeSettings.pagseguroToken || ''}
+                              placeholder="Digite ou cole o token do PagSeguro"
+                              onChange={(e) => setStoreSettings({ ...storeSettings, pagseguroToken: e.target.value })}
+                              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white font-mono"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Toggleable checkout parameters */}
+                      <div className="bg-white p-5 rounded-3xl border border-slate-150 space-y-4">
+                        <h4 className="text-[11px] font-black text-rose-650 uppercase tracking-widest flex items-center gap-1.5 border-b border-rose-50 pb-2">
+                          💳 Métodos de Pagamento Oferecidos no Site
+                        </h4>
+
+                        <div className="space-y-3.5">
+                          {/* Pix Online Toggle */}
+                          <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <div>
+                              <h5 className="text-[11px] font-extrabold text-slate-800">Pix Online (QR Code / Copia e Cola)</h5>
+                              <p className="text-[9.5px] text-slate-400 leading-tight font-medium">Gera o QR Code dinâmico com o valor exato na tela do cliente.</p>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={storeSettings.paymentPixEnabled !== false}
+                                onChange={(e) => setStoreSettings({ ...storeSettings, paymentPixEnabled: e.target.checked })}
+                                className="w-5 h-5 text-indigo-650 rounded-md accent-rose-500 cursor-pointer"
+                              />
+                            </label>
+                          </div>
+
+                          {/* Online Card Toggle */}
+                          <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <div>
+                              <h5 className="text-[11px] font-extrabold text-slate-800">Pagar com Cartão de Crédito Online</h5>
+                              <p className="text-[9.5px] text-slate-400 leading-tight font-medium">Permite que o cliente insira os dados do cartão de crédito diretamente no site.</p>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={storeSettings.paymentCardEnabled !== false}
+                                onChange={(e) => setStoreSettings({ ...storeSettings, paymentCardEnabled: e.target.checked })}
+                                className="w-5 h-5 text-indigo-650 rounded-md accent-rose-500 cursor-pointer"
+                              />
+                            </label>
+                          </div>
+
+                          {/* Cash on Delivery Toggle */}
+                          <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <div>
+                              <h5 className="text-[11px] font-extrabold text-slate-800">Dinheiro na Entrega (com opção de troco)</h5>
+                              <p className="text-[9.5px] text-slate-400 leading-tight font-medium">Pagamento em espécie ao entregador com aviso automático de troco.</p>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={storeSettings.paymentCashDeliveryEnabled !== false}
+                                onChange={(e) => setStoreSettings({ ...storeSettings, paymentCashDeliveryEnabled: e.target.checked })}
+                                className="w-5 h-5 text-indigo-650 rounded-md accent-rose-500 cursor-pointer"
+                              />
+                            </label>
+                          </div>
+
+                          {/* Card on Delivery Toggle */}
+                          <div className="flex items-center justify-between p-3 rounded-2xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                            <div>
+                              <h5 className="text-[11px] font-extrabold text-slate-800">Maquininha de Cartão na Entrega (Débito/Crédito)</h5>
+                              <p className="text-[9.5px] text-slate-400 leading-tight font-medium">O entregador leva a máquina física até o endereço para o cliente passar o cartão.</p>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer select-none">
+                              <input 
+                                type="checkbox" 
+                                checked={storeSettings.paymentCardDeliveryEnabled !== false}
+                                onChange={(e) => setStoreSettings({ ...storeSettings, paymentCardDeliveryEnabled: e.target.checked })}
+                                className="w-5 h-5 text-indigo-650 rounded-md accent-rose-500 cursor-pointer"
+                              />
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bg-teal-50 border border-teal-200/50 p-4 rounded-3xl">
+                        <p className="text-[10px] text-teal-800 font-bold leading-normal">
+                          💡 <strong>Dica Supreme:</strong> Desativar métodos desnecessários otimiza o fluxo de decisão do cliente no momento da compra, acelerando os fechamentos! Todas as configurações refletem em tempo real no app dos clientes.
+                        </p>
+                      </div>
                     </div>
+                  )}
 
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Tipo de Fonte</label>
-                      <select
-                        value={storeSettings.printerFontType || 'monospace'}
-                        onChange={(e) => setStoreSettings({ ...storeSettings, printerFontType: e.target.value })}
-                        className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium"
-                      >
-                        <option value="monospace">Monospace (Tradicional)</option>
-                        <option value="sans-serif">Sans-serif (Moderno)</option>
-                        <option value="serif">Serifado (Elegant/Vintage)</option>
-                      </select>
+                  {settingsTab === 'timing' && (
+                    <div className="space-y-4 animate-fadeIn text-left">
+                      <h4 className="text-[11px] font-black text-rose-550 uppercase tracking-widest flex items-center gap-1.5 border-b border-rose-50/50 pb-2">
+                        🕒 Definições de Funcionamento
+                      </h4>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Abertura (HH:MM)</label>
+                          <input
+                            type="text"
+                            value={storeSettings.openTime}
+                            placeholder="Ex: 11:00"
+                            onChange={(e) => setStoreSettings({ ...storeSettings, openTime: e.target.value })}
+                            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Fechamento (HH:MM)</label>
+                          <input
+                            type="text"
+                            value={storeSettings.closeTime}
+                            placeholder="Ex: 23:00"
+                            onChange={(e) => setStoreSettings({ ...storeSettings, closeTime: e.target.value })}
+                            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 pt-2">
+                        <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Forçar Funcionamento (Simulado)</label>
+                        <div className="grid grid-cols-3 gap-1.5 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => setStoreSettings({ ...storeSettings, statusOverride: 'auto' })}
+                            className={`text-[10px] font-black py-2 rounded-xl transition-all uppercase cursor-pointer ${
+                              storeSettings.statusOverride === 'auto'
+                                ? 'bg-rose-500 text-white shadow-xs'
+                                : 'text-slate-500 hover:text-slate-800 hover:bg-white'
+                            }`}
+                          >
+                            Automático
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setStoreSettings({ ...storeSettings, statusOverride: 'open' })}
+                            className={`text-[10px] font-black py-2 rounded-xl transition-all uppercase cursor-pointer ${
+                              storeSettings.statusOverride === 'open'
+                                ? 'bg-emerald-500 text-white shadow-xs'
+                                : 'text-slate-500 hover:text-slate-800 hover:bg-white'
+                            }`}
+                          >
+                            Forçar Aberto
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setStoreSettings({ ...storeSettings, statusOverride: 'closed' })}
+                            className={`text-[10px] font-black py-2 rounded-xl transition-all uppercase cursor-pointer ${
+                              storeSettings.statusOverride === 'closed'
+                                ? 'bg-rose-500 text-white shadow-xs'
+                                : 'text-slate-500 hover:text-slate-800 hover:bg-white'
+                            }`}
+                          >
+                            Forçar Fechado
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-slate-450 leading-relaxed font-normal">
+                          <strong>Automático:</strong> Compara a hora local com os campos acima.<br />
+                          <strong>Forçar:</strong> Permite simular se a sorveteria está aberta ou fechada para testar o comportamento visual da compra se estiver testando fora do horário regular.
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Título do Comprovante</label>
-                    <input
-                      type="text"
-                      value={storeSettings.printerHeaderMessage || ''}
-                      placeholder="Ex: Via de Produção"
-                      onChange={(e) => setStoreSettings({ ...storeSettings, printerHeaderMessage: e.target.value })}
-                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium"
-                    />
-                  </div>
+                  {settingsTab === 'delivery' && (
+                    <div className="space-y-4 animate-fadeIn text-left">
+                      <div className="flex justify-between items-center border-b border-rose-50/50 pb-2">
+                        <h4 className="text-[11px] font-black text-rose-550 uppercase tracking-widest flex items-center gap-1.5">
+                          <MapPin className="w-3.5 h-3.5" /> Taxas de Entrega por Bairro e CEP
+                        </h4>
+                        <span className="text-[10px] text-slate-455 font-bold bg-slate-100 px-2.5 py-1 rounded-full">{storeSettings.deliveryFees?.length || 0} Regras</span>
+                      </div>
 
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Mensagem do Rodapé</label>
-                    <input
-                      type="text"
-                      value={storeSettings.printerFooterMessage || ''}
-                      placeholder="Ex: Muito obrigado pela preferência!"
-                      onChange={(e) => setStoreSettings({ ...storeSettings, printerFooterMessage: e.target.value })}
-                      className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium"
-                    />
-                  </div>
+                      <div className="space-y-3 max-h-[45vh] overflow-y-auto pr-1">
+                        {(storeSettings.deliveryFees || []).map((feeItem: any, index: number) => (
+                          <div key={index} className="flex flex-col gap-3 bg-white p-3 rounded-2xl border border-slate-200 animate-fadeIn text-left shadow-xs">
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1">
+                                <label className="block text-[8.5px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Identificador / Bairro</label>
+                                <input
+                                  type="text"
+                                  placeholder="Ex: Centro / Vila Real"
+                                  value={feeItem.neighborhood}
+                                  onChange={(e) => {
+                                    const updated = [...(storeSettings.deliveryFees || [])];
+                                    updated[index] = { ...updated[index], neighborhood: e.target.value };
+                                    setStoreSettings({ ...storeSettings, deliveryFees: updated });
+                                  }}
+                                  className="w-full text-xs p-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-rose-500 bg-slate-50/20 font-bold text-slate-800"
+                                />
+                              </div>
+                              <div className="w-24">
+                                <label className="block text-[8.5px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Taxa (R$)</label>
+                                <div className="relative">
+                                  <span className="absolute left-2 top-2 text-[10px] font-bold text-slate-400">R$</span>
+                                  <input
+                                    type="number"
+                                    step="0.50"
+                                    placeholder="Taxa"
+                                    value={feeItem.fee}
+                                    onChange={(e) => {
+                                      const updated = [...(storeSettings.deliveryFees || [])];
+                                      updated[index] = { ...updated[index], fee: Number(e.target.value) };
+                                      setStoreSettings({ ...storeSettings, deliveryFees: updated });
+                                    }}
+                                    className="w-full text-xs p-2 pl-6 rounded-lg border border-slate-200 focus:outline-none focus:ring-1 focus:ring-rose-500 bg-slate-50/20 font-bold text-rose-600 animate-fadeIn"
+                                  />
+                                </div>
+                              </div>
+                              <div className="pt-3">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = (storeSettings.deliveryFees || []).filter((_: any, i: number) => i !== index);
+                                    setStoreSettings({ ...storeSettings, deliveryFees: updated });
+                                  }}
+                                  className="p-2 text-rose-550 hover:text-rose-750 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Remover Regra"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
 
-                  <div className="flex items-center gap-2 py-1 select-none">
-                    <input
-                      type="checkbox"
-                      id="printerShowAddress"
-                      checked={storeSettings.printerShowAddress !== false}
-                      onChange={(e) => setStoreSettings({ ...storeSettings, printerShowAddress: e.target.checked })}
-                      className="w-4 h-4 rounded-md border-slate-350 text-rose-500 focus:ring-rose-500 cursor-pointer"
-                    />
-                    <label htmlFor="printerShowAddress" className="text-[10px] font-bold uppercase tracking-wide text-slate-600 cursor-pointer">
-                      Mostrar Endereço e Telefone da Loja no Cupom
-                    </label>
-                  </div>
+                            {/* CEP Mapping Sub-section */}
+                            <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100 space-y-1.5 label-spacing">
+                              <span className="text-[10.5px] font-bold text-slate-650 flex items-center justify-between gap-1">
+                                <span className="flex items-center gap-1">🔢 Mapeamento de CEP opcional (Regra de CEP / Correios)</span>
+                                <a 
+                                  href="https://buscacepinter.correios.com.br/app/endereco/index.php" 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  className="text-[9.5px] font-extrabold text-rose-550 hover:underline flex items-center gap-0.5"
+                                >
+                                  Consultar CEPs 🔍
+                                </a>
+                              </span>
+                              <div className="grid grid-cols-3 gap-2">
+                                <div>
+                                  <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider mb-0.5">CEP Único</label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ex: 13180-035"
+                                    value={feeItem.exactCep || ''}
+                                    onChange={(e) => {
+                                      const updated = [...(storeSettings.deliveryFees || [])];
+                                      updated[index] = { ...updated[index], exactCep: e.target.value, cepStart: '', cepEnd: '' };
+                                      setStoreSettings({ ...storeSettings, deliveryFees: updated });
+                                    }}
+                                    className="w-full text-[10px] p-1.5 rounded-md border border-slate-150 focus:outline-none focus:ring-1 focus:ring-rose-500 bg-white text-slate-700 font-mono"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider mb-0.5">CEP Inicial (Bloco)</label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ex: 13180-000"
+                                    value={feeItem.cepStart || ''}
+                                    onChange={(e) => {
+                                      const updated = [...(storeSettings.deliveryFees || [])];
+                                      updated[index] = { ...updated[index], cepStart: e.target.value, exactCep: '' };
+                                      setStoreSettings({ ...storeSettings, deliveryFees: updated });
+                                    }}
+                                    className="w-full text-[10px] p-1.5 rounded-md border border-slate-150 focus:outline-none focus:ring-1 focus:ring-rose-500 bg-white text-slate-700 font-mono"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[8px] font-black text-slate-400 uppercase tracking-wider mb-0.5">CEP Final (Bloco)</label>
+                                  <input
+                                    type="text"
+                                    placeholder="Ex: 13180-999"
+                                    value={feeItem.cepEnd || ''}
+                                    onChange={(e) => {
+                                      const updated = [...(storeSettings.deliveryFees || [])];
+                                      updated[index] = { ...updated[index], cepEnd: e.target.value, exactCep: '' };
+                                      setStoreSettings({ ...storeSettings, deliveryFees: updated });
+                                    }}
+                                    className="w-full text-[10px] p-1.5 rounded-md border border-slate-150 focus:outline-none focus:ring-1 focus:ring-rose-500 bg-white text-slate-700 font-mono"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                        
+                        {(storeSettings.deliveryFees || []).length === 0 && (
+                          <div className="text-center py-6 text-slate-400 font-medium">Nenhuma taxa cadastrada.</div>
+                        )}
+                      </div>
 
-                  <div className="bg-rose-50/50 border border-rose-100 p-3 rounded-2xl space-y-2">
-                    <div className="flex justify-between items-center">
-                      <p className="text-[10px] text-rose-600 leading-normal font-semibold">
-                        Quer testar se sua impressora térmica está respondendo corretamente?
-                      </p>
                       <button
                         type="button"
                         onClick={() => {
-                          const mockOrder = {
-                            id: 'TEST99',
-                            timestamp: new Date().toLocaleString('pt-BR'),
-                            status: 'preparing' as const,
-                            total: 39.90,
-                            details: {
-                              customerName: 'Cliente de Teste 🍦',
-                              customerPhone: '(11) 98765-4321',
-                              deliveryType: 'delivery' as const,
-                              address: {
-                                street: 'Rua das Palmeiras de Teste',
-                                number: '123',
-                                neighborhood: 'Bairro Jardim Doce',
-                                city: storeSettings.city,
-                                reference: 'Próximo à Praça Central'
-                              },
-                              paymentType: 'pix' as const
-                            },
-                            items: [
-                              {
-                                id: 'item-1',
-                                menuItem: {
-                                  id: '1',
-                                  name: 'Copo Supreme 400ml',
-                                  description: 'Copo montado personalizado',
-                                  price: 24.90,
-                                  category: 'acai' as const,
-                                  image: ''
-                                },
-                                quantity: 1,
-                                isCustomCup: true,
-                                customCupConfig: {
-                                  size: '400ml' as const,
-                                  base: 'acai' as const,
-                                  flavors: [],
-                                  toppings: []
-                                },
-                                customCupPrice: 24.90,
-                                notes: 'Sem banana e com bastante leite condensado'
-                              },
-                              {
-                                id: 'item-2',
-                                menuItem: {
-                                  id: '2',
-                                  name: 'Sundae Morango Especial',
-                                  description: 'Delicioso sundae com calda caseira de frutas vermelhas',
-                                  price: 15.00,
-                                  category: 'sundae' as const,
-                                  image: ''
-                                },
-                                quantity: 1
-                              }
-                            ]
-                          };
-                          printOrderReceipt(mockOrder, storeSettings);
+                          const current = storeSettings.deliveryFees || [];
+                          setStoreSettings({
+                            ...storeSettings,
+                            deliveryFees: [...current, { neighborhood: '', fee: 5.00 }]
+                          });
                         }}
-                        className="px-3.5 py-2 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-xs flex items-center gap-1 cursor-pointer select-none"
+                        className="w-full py-2.5 border border-dashed border-slate-200 hover:bg-slate-50 text-slate-600 font-bold rounded-xl text-xs flex items-center justify-center gap-1 transition-colors cursor-pointer"
                       >
-                        <Printer className="w-3 h-3" /> Imprimir Teste
+                        <Plus className="w-4 h-4" /> Adicionar Novo Bairro
                       </button>
                     </div>
-                  </div>
-                </div>
+                  )}
 
-                {/* Diagnostics / Clear cache troubleshooting helper */}
-                <div className="pt-2.5 border-t border-slate-100 space-y-3">
-                  <h4 className="text-[11px] font-black text-amber-600 uppercase tracking-widest flex items-center gap-1.5">
-                    <ShieldAlert className="w-3.5 h-3.5" /> Solução de Problemas
-                  </h4>
-                  <div className="bg-amber-50/50 border border-amber-200/40 p-3.5 rounded-2xl space-y-2">
-                    <p className="text-[10px] text-slate-500 leading-relaxed font-normal">
-                      Caso o aplicativo esteja enfrentando lentidão, travando ou apresentando tela branca em outros aparelhos, limpe o cache antigo para carregar a versão mais recente diretamente.
-                    </p>
-                    <button
-                      onClick={async () => {
-                        if (confirm("Deseja realmente limpar todos os dados em cache e recarregar o aplicativo? Isso removerá o carrinho atual.")) {
-                          try {
-                            if ('serviceWorker' in navigator) {
-                              const registrations = await navigator.serviceWorker.getRegistrations();
-                              for (const registration of registrations) {
-                                await registration.unregister();
+                  {settingsTab === 'printer' && (
+                    <div className="space-y-4 animate-fadeIn text-left">
+                      <div className="flex items-center justify-between border-b border-rose-50/50 pb-2">
+                        <h4 className="text-[11px] font-black text-rose-550 uppercase tracking-widest flex items-center gap-1.5">
+                          <Printer className="w-4 h-4" /> Impressora Térmica Não Fiscal
+                        </h4>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const testOrder: any = {
+                              id: 'TESTE99',
+                              timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                              status: 'preparing' as const,
+                              total: 39.90,
+                              details: {
+                                customerName: 'Cliente do Teste 🍦',
+                                customerPhone: '(11) 98765-4321',
+                                deliveryType: 'delivery' as const,
+                                address: {
+                                  street: 'Rua das Palmeiras Gourmet',
+                                  number: '123',
+                                  neighborhood: 'Bairro Jardim Doce',
+                                  city: storeSettings.city,
+                                  reference: 'Próxima à Praça Central'
+                                },
+                                paymentType: 'pix' as const
+                              },
+                              items: [
+                                {
+                                  id: 'it-1',
+                                  menuItem: {
+                                    id: '1',
+                                    name: 'Copo Supreme 400ml',
+                                    description: 'Copo montado personalizado',
+                                    price: 24.90,
+                                    category: 'acai' as const,
+                                    image: ''
+                                  },
+                                  quantity: 1,
+                                  isCustomCup: true,
+                                  customCupConfig: {
+                                    size: '400ml',
+                                    base: 'acai',
+                                    flavors: [],
+                                    toppings: []
+                                  },
+                                  customCupPrice: 24.90,
+                                  notes: 'Sem banana, caprichar no leite condensado'
+                                }
+                              ]
+                            };
+                            printOrderReceipt(testOrder, storeSettings);
+                          }}
+                          className="px-3 py-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all shadow-xs flex items-center gap-1 cursor-pointer select-none"
+                        >
+                          <Printer className="w-3.5 h-3.5" /> Imprimir Teste
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Tamanho da Bobina</label>
+                          <select
+                            value={storeSettings.printerPaperWidth || '80mm'}
+                            onChange={(e) => setStoreSettings({ ...storeSettings, printerPaperWidth: e.target.value as "58mm" | "80mm" })}
+                            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                          >
+                            <option value="80mm">80mm (Mesa / Balcão USB)</option>
+                            <option value="58mm">58mm (Portátil Bluetooth)</option>
+                          </select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Via / Cópias por Pedido</label>
+                          <select
+                            value={storeSettings.printerNumCopies || 1}
+                            onChange={(e) => setStoreSettings({ ...storeSettings, printerNumCopies: Number(e.target.value) })}
+                            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                          >
+                            <option value={1}>1 Via (Padrão)</option>
+                            <option value={2}>2 Vias (Balcão + Entrega)</option>
+                            <option value={3}>3 Vias (Cozinha + Delivery + Log)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Tamanho da Fonte</label>
+                          <select
+                            value={storeSettings.printerFontSize || 12}
+                            onChange={(e) => setStoreSettings({ ...storeSettings, printerFontSize: Number(e.target.value) })}
+                            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                          >
+                            <option value={10}>10px (Compacto)</option>
+                            <option value={11}>11px (Pequeno)</option>
+                            <option value={12}>12px (Médio / Ideal)</option>
+                            <option value={14}>14px (Grande / Legível)</option>
+                          </select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Tipo de Fonte</label>
+                          <select
+                            value={storeSettings.printerFontType || 'monospace'}
+                            onChange={(e) => setStoreSettings({ ...storeSettings, printerFontType: e.target.value as "sans-serif" | "serif" | "monospace" })}
+                            className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                          >
+                            <option value="monospace">Monospace (Tradicional)</option>
+                            <option value="sans-serif">Sans-serif (Moderno)</option>
+                            <option value="serif">Serif (Clássico)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Título do Cabeçalho Impresso</label>
+                        <input
+                          type="text"
+                          value={storeSettings.printerHeaderMessage || ''}
+                          placeholder="Ex: Via de Produção"
+                          onChange={(e) => setStoreSettings({ ...storeSettings, printerHeaderMessage: e.target.value })}
+                          className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-black uppercase tracking-wide text-slate-500">Rodapé do Cupom de Impressão</label>
+                        <input
+                          type="text"
+                          value={storeSettings.printerFooterMessage || ''}
+                          placeholder="Ex: Obrigado pelo pedido!"
+                          onChange={(e) => setStoreSettings({ ...storeSettings, printerFooterMessage: e.target.value })}
+                          className="w-full text-xs p-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 bg-white font-medium text-slate-800"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2 select-none">
+                        <input
+                          type="checkbox"
+                          id="printerShowAddress"
+                          checked={storeSettings.printerShowAddress !== false}
+                          onChange={(e) => setStoreSettings({ ...storeSettings, printerShowAddress: e.target.checked })}
+                          className="w-4 h-4 rounded-md border-slate-200 text-rose-500 focus:ring-rose-500 cursor-pointer"
+                        />
+                        <label htmlFor="printerShowAddress" className="text-[10px] font-black uppercase tracking-wide text-slate-600 cursor-pointer">
+                          Imprimir Dados Cadastrais e Endereço da Sorveteria no Cupom
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
+                  {settingsTab === 'advanced' && (
+                    <div className="space-y-4 animate-fadeIn text-left">
+                      <h4 className="text-[11px] font-black text-rose-550 uppercase tracking-widest flex items-center gap-1.5 border-b border-rose-50/50 pb-2">
+                        ⚙️ Ajustes Avançados e Solução de Problemas
+                      </h4>
+
+                      <div className="bg-amber-50/40 border border-amber-200/50 p-4 rounded-3xl space-y-2 text-left">
+                        <h5 className="text-[10px] font-black text-amber-700 uppercase tracking-wider flex items-center gap-1">
+                          <ShieldAlert className="w-3.5 h-3.5 animate-pulse" /> Limpeza Preventiva de Cache
+                        </h5>
+                        <p className="text-[10.5px] text-slate-500 leading-relaxed font-semibold">
+                          Caso o aplicativo sofra travamentos, lentidão ou não carregue atualizações em celulares secundários ou navegadores de clientes, use a redefinição de Service Workers abaixo. Isso restabelece a conexão ideal!
+                        </p>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (confirm("Deseja realmente limpar todos os dados em cache e recarregar o aplicativo? Isso recarregará o carrinho de compras atual.")) {
+                              try {
+                                if ('serviceWorker' in navigator) {
+                                  const registrations = await navigator.serviceWorker.getRegistrations();
+                                  for (const registration of registrations) {
+                                    await registration.unregister();
+                                  }
+                                }
+                                if ('caches' in window) {
+                                  const keys = await caches.keys();
+                                  for (const key of keys) {
+                                    await caches.delete(key);
+                                  }
+                                }
+                                localStorage.removeItem('supreme_store_settings');
+                                localStorage.removeItem('supreme_cart');
+                                localStorage.removeItem('supreme_orders');
+                                window.location.href = window.location.origin + '?nocache=' + Date.now();
+                              } catch (e) {
+                                window.location.reload();
                               }
                             }
-                            if ('caches' in window) {
-                              const keys = await caches.keys();
-                              for (const key of keys) {
-                                await caches.delete(key);
-                              }
+                          }}
+                          className="w-full py-2.5 bg-amber-550 hover:bg-amber-600 text-slate-950 font-black uppercase text-[9px] tracking-widest rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer mt-1"
+                        >
+                          <RefreshCw className="w-3 h-3 animate-[spin_6s_linear_infinite]" />
+                          Limpar Cache dos Dispositivos e Reatualizar App
+                        </button>
+                      </div>
+
+                      <div className="bg-red-50/40 border border-red-100 p-4 rounded-3xl space-y-2 text-left">
+                        <h5 className="text-[10px] font-black text-rose-700 uppercase tracking-wider">Redefinição de Fábrica</h5>
+                        <p className="text-[10.5px] text-slate-500 leading-relaxed font-semibold">
+                          Isso limpará todas as modificações salvas como taxas, horário de abertura e fechará as sessões locais de cache retornando aos valores originais de demonstração.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (window.confirm("Deseja redefinir as configurações para os dados originais?")) {
+                              const defaults = {
+                                ...STORE_CONFIG,
+                                openTime: "11:00",
+                                closeTime: "23:00",
+                                statusOverride: "auto" as "auto" | "open" | "closed",
+                                printerPaperWidth: "80mm" as "58mm" | "80mm",
+                                printerNumCopies: 1,
+                                printerFontSize: 12,
+                                printerFontType: "monospace" as "monospace" | "sans-serif" | "serif",
+                                printerShowAddress: true,
+                                printerHeaderMessage: "Comprovante de Pedido",
+                                printerFooterMessage: "Muito obrigado pela preferência!",
+                                pixKey: 'contato@sorveteriasupreme.com.br',
+                                pixReceiverName: 'Sorveteria Gourmet Supreme',
+                                pixReceiverCity: 'Monte Mor',
+                                pixKeyType: 'email',
+                                paymentPixEnabled: true,
+                                paymentCardEnabled: true,
+                                paymentCashDeliveryEnabled: true,
+                                paymentCardDeliveryEnabled: true,
+                                deliveryFees: [
+                                  { neighborhood: 'Centro', fee: 5.00 },
+                                  { neighborhood: 'Jardim Alvorada', fee: 6.00 },
+                                  { neighborhood: 'Jardim Paulista', fee: 7.00 },
+                                  { neighborhood: 'Parque Indaiá', fee: 8.00 },
+                                  { neighborhood: 'Jardim São Clemente', fee: 7.00 },
+                                  { neighborhood: 'Jardim Moreira', fee: 6.50 },
+                                  { neighborhood: 'Jardim Colina', fee: 6.00 }
+                                ]
+                              };
+                              setStoreSettings(defaults);
+                              await handleSaveStoreSettingsToFirestore(defaults);
                             }
-                            localStorage.removeItem('supreme_store_settings');
-                            localStorage.removeItem('supreme_cart');
-                            localStorage.removeItem('supreme_orders');
-                            window.location.href = window.location.origin + '?nocache=' + Date.now();
-                          } catch (e) {
-                            window.location.reload();
-                          }
-                        }
-                      }}
-                      className="w-full py-2.5 bg-amber-550 hover:bg-amber-600 text-slate-950 font-black uppercase text-[9px] tracking-widest rounded-xl transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
-                    >
-                      <RefreshCw className="w-3 h-3 animate-[spin_6s_linear_infinite]" />
-                      Limpar Cache e Forçar Atualização
-                    </button>
-                  </div>
+                          }}
+                          className="w-full py-2.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 font-extrabold uppercase text-[9px] tracking-widest rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          Redefinir Configurações para Valor Padrão
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Footer */}
-              <div className="p-4 border-t border-slate-50 bg-slate-50/80 flex justify-end gap-2.5">
-                <button
-                  onClick={async () => {
-                    // Reset to defaults
-                    if (window.confirm("Deseja redefinir as configurações para os dados originais?")) {
-                      const defaults = {
-                        ...STORE_CONFIG,
-                        openTime: "11:00",
-                        closeTime: "23:00",
-                        statusOverride: "auto",
-                        printerPaperWidth: "80mm",
-                        printerNumCopies: 1,
-                        printerFontSize: 12,
-                        printerFontType: "monospace",
-                        printerShowAddress: true,
-                        printerHeaderMessage: "Comprovante de Pedido",
-                        printerFooterMessage: "Muito obrigado pela preferência!",
-                      };
-                      setStoreSettings(defaults);
-                      await handleSaveStoreSettingsToFirestore(defaults);
-                    }
-                  }}
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition-colors cursor-pointer text-xs font-bold"
-                >
-                  Restaurar Padrão
-                </button>
-                <button
-                  onClick={async () => {
-                    await handleSaveStoreSettingsToFirestore(storeSettings);
-                    setIsSettingsOpen(false);
-                  }}
-                  className="px-6 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white shadow-md shadow-rose-100 transition-all cursor-pointer text-xs font-extrabold"
-                >
-                  Salvar e Fechar
-                </button>
+              <div className="p-4 border-t border-slate-150 bg-slate-50/80 flex flex-col gap-3 flex-shrink-0">
+                {saveStatus !== 'idle' && (
+                  <div className={`p-2.5 rounded-xl text-xs font-bold transition-all animate-fadeIn ${
+                    saveStatus === 'saving' ? 'bg-indigo-50 border border-indigo-150 text-indigo-700' :
+                    saveStatus === 'success' ? 'bg-emerald-50 border border-emerald-150 text-emerald-750' :
+                    'bg-rose-50 border border-rose-150 text-rose-700'
+                  }`}>
+                    {saveStatus === 'saving' && (
+                      <span className="flex items-center gap-1.5 justify-center">
+                        <span className="animate-spin text-indigo-500">⏳</span> Sincronizando lotes de CEP e configurações com o banco...
+                      </span>
+                    )}
+                    {saveStatus === 'success' && (
+                      <span className="flex items-center gap-1.5 justify-center text-emerald-750">
+                        🎉 Sucesso! Suas taxas de entrega ({storeSettings.deliveryFees?.length || 0} regras) foram salvas no Firestore.
+                      </span>
+                    )}
+                    {saveStatus === 'error' && (
+                      <span className="flex flex-col gap-1 text-center">
+                        <span>❌ Erro ao salvar no banco (Verifique regras de segurança):</span>
+                        <span className="font-mono text-[10px] text-rose-600 block bg-white/50 p-1 rounded">{saveErrorMessage}</span>
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2.5">
+                  <button
+                    onClick={() => setIsSettingsOpen(false)}
+                    className="px-5 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-650 transition-colors cursor-pointer text-xs font-bold"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={async () => {
+                      await handleSaveStoreSettingsToFirestore(storeSettings);
+                      setTimeout(() => {
+                        setIsSettingsOpen(false);
+                      }, 2000);
+                    }}
+                    disabled={saveStatus === 'saving'}
+                    className="px-6 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white shadow-md shadow-rose-100 transition-all cursor-pointer text-xs font-black uppercase tracking-wider disabled:opacity-50"
+                  >
+                    Salvar Todas Configurações
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
@@ -3805,6 +4674,125 @@ E-mail: ${storeSettings.email}`;
               >
                 Muito Obrigado! ❤️
               </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+
+
+      {/* PWA Home Screen Installation Confirmation Modal */}
+      <AnimatePresence>
+        {isCustomInstallModalOpen && (
+          <div className="fixed inset-0 z-[1000] overflow-y-auto flex items-center justify-center p-4">
+            {/* Backdrop */}
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsCustomInstallModalOpen(false)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs" 
+            />
+
+            {/* Container */}
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="bg-white rounded-[32px] max-w-sm w-full flex flex-col overflow-hidden shadow-2xl border border-rose-50 relative z-[1010] font-sans p-6 text-center"
+            >
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setIsCustomInstallModalOpen(false)}
+                  className="p-1.5 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Logo / Heading */}
+              <div className="flex flex-col items-center gap-3.5 mt-1 mb-5">
+                <div className="w-16 h-16 flex items-center justify-center filter drop-shadow-md select-none">
+                  <SupremeLogo size={68} className="w-full h-full animate-[pulse_6s_infinite]" />
+                </div>
+                <h3 className="text-[17px] font-black tracking-tight text-slate-900 uppercase leading-snug">
+                  Deseja adicionar Sorveteria Supreme em sua tela inicial?
+                </h3>
+                <p className="text-[11.5px] text-slate-500 font-semibold leading-relaxed px-1">
+                  Tenha o nosso cardápio completo de açaí gourmet e sorvetes premium sempre à mão com apenas um toque!
+                </p>
+              </div>
+
+              {/* Install guide */}
+              <div className="bg-rose-50/45 border border-rose-100/30 rounded-2xl p-4 text-left text-xs text-slate-700 space-y-3 mb-5">
+                <div className="flex items-center gap-2 text-rose-600 font-extrabold text-[11px] uppercase tracking-wider">
+                  <Sparkles className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Como funciona a instalação:</span>
+                </div>
+                <p className="text-[10.5px] text-slate-650 leading-relaxed font-semibold">
+                  O aplicativo <strong className="text-slate-800">não precisa baixar nenhum arquivo pesado (.apk ou .ipa)</strong> que gaste a memória do celular. Ele é um aplicativo web leve (PWA) instalado diretamente pelo seu navegador em 5 segundos!
+                </p>
+
+                <div className="border-t border-rose-100/60 pt-3 mt-2 space-y-3">
+                  <div>
+                    <p className="font-black text-[10.5px] text-rose-600 mb-1 uppercase tracking-wider">📱 No iPhone (Safari):</p>
+                    <p className="text-slate-600 text-[10.5px] font-semibold leading-relaxed">
+                      1. Toque no botão de <strong className="text-slate-800">Compartilhar</strong> (ícone de quadrado com uma seta para cima na barra inferior do Safari).<br />
+                      2. Role a lista para baixo e toque em <strong className="text-slate-800">"Adicionar à Tela de Início"</strong>.
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="font-black text-[10.5px] text-emerald-600 mb-1 uppercase tracking-wider">🤖 No Android (Chrome):</p>
+                    <p className="text-slate-600 text-[10.5px] font-semibold leading-relaxed">
+                      1. Toque nos <strong className="text-slate-800">três pontinhos</strong> no canto superior direito do seu navegador.<br />
+                      2. Selecione <strong className="text-slate-800">"Instalar aplicativo"</strong> ou <strong className="text-slate-800">"Adicionar à tela de início"</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-[9.5px] bg-slate-100 p-2 rounded-xl text-slate-500 leading-tight border border-slate-200">
+                  ⚠️ <strong className="text-slate-600">Nota para a pré-visualização:</strong> Se você estiver testando dentro do editor de código do AI Studio (iframe), os navegadores bloqueiam solicitações de instalação. Abra o site em <strong className="text-slate-600">uma nova aba cheia</strong> para testar a instalação real!
+                </div>
+              </div>
+
+              {/* Choice Buttons */}
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsCustomInstallModalOpen(false)}
+                  className="flex-1 py-3 border border-slate-200 rounded-2xl text-[11px] font-extrabold text-slate-500 hover:bg-slate-50 transition-all text-center cursor-pointer active:scale-95"
+                >
+                  Fechar
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (deferredPrompt) {
+                      setIsCustomInstallModalOpen(false);
+                      deferredPrompt.prompt();
+                      const { outcome } = await deferredPrompt.userChoice;
+                      console.log(`User prompt shortcut: ${outcome}`);
+                      if (outcome === 'accepted') {
+                        setDeferredPrompt(null);
+                        setShowInstallBanner(false);
+                      }
+                    } else {
+                      const isiOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+                      if (isiOS) {
+                        alert("Para instalar no seu iPhone:\n\n1. Clique no botão Compartilhar (quadrado com seta para cima) na barra inferior do Safari.\n2. Escolha 'Adicionar à Tela de Início'.\n\nPronto! O aplicativo será instalado em sua tela inicial.");
+                      } else {
+                        alert("Para instalar no seu Android:\n\n1. Clique nos três pontinhos no canto superior direito do Chrome.\n2. Escolha 'Instalar aplicativo' ou 'Adicionar à tela de início'.\n\nPronto! O aplicativo será adicionado à sua tela inicial.");
+                      }
+                    }
+                  }}
+                  className="flex-1 py-3 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 active:scale-95 transition-all text-white text-[11px] font-black uppercase tracking-wider rounded-2xl shadow-lg shadow-rose-100 text-center cursor-pointer flex items-center justify-center gap-1"
+                >
+                  ✨ Adicionar Agora
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

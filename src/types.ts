@@ -13,6 +13,8 @@ export interface MenuItem {
   tags?: string[];
   popular?: boolean;
   customizable?: boolean;
+  allowedToppings?: string[];
+  allowedFlavors?: string[];
 }
 
 export interface ToppingOption {
@@ -62,6 +64,7 @@ export interface CheckoutDetails {
     neighborhood: string;
     city: string;
     reference?: string;
+    cep?: string;
   };
   paymentType: PaymentType;
   cardDetails?: {
@@ -81,3 +84,54 @@ export interface Order {
   timestamp: string;
   archived?: boolean;
 }
+
+export interface StoreSettings {
+  name: string;
+  shortName: string;
+  city: string;
+  address: string;
+  phone: string;
+  email: string;
+  openTime: string;
+  closeTime: string;
+  statusOverride: 'auto' | 'open' | 'closed';
+  printerPaperWidth: '58mm' | '80mm';
+  printerNumCopies: number;
+  printerFontSize: number;
+  printerFontType: 'monospace' | 'sans-serif' | 'serif';
+  printerShowAddress: boolean;
+  printerHeaderMessage: string;
+  printerFooterMessage: string;
+  instagram?: string;
+  customDomain?: string;
+  deliveryFees: { 
+    neighborhood: string; 
+    fee: number; 
+    exactCep?: string;
+    cepStart?: string;
+    cepEnd?: string;
+  }[];
+  
+  // Payment Configs
+  pixKey?: string;
+  pixReceiverName?: string;
+  pixReceiverCity?: string;
+  pixKeyType?: string;
+  paymentPixEnabled?: boolean;
+  paymentCardEnabled?: boolean;
+  paymentCashDeliveryEnabled?: boolean;
+  paymentCardDeliveryEnabled?: boolean;
+
+  // PagSeguro configuration
+  pagseguroEnabled?: boolean;
+  pagseguroEmail?: string;
+  pagseguroToken?: string;
+  pagseguroEnvironment?: 'sandbox' | 'production';
+
+  // Customizable WhatsApp Bot properties
+  whatsappBotWelcomeMessage?: string;
+  whatsappBotMenuMessage?: string;
+  whatsappBotSupportMessage?: string;
+  whatsappBotMenuLink?: string;
+}
+

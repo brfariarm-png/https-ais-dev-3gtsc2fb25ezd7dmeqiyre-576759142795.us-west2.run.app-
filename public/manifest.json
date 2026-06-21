@@ -1,4 +1,5 @@
 {
+  "id": "/?source=pwa",
   "short_name": "Supreme",
   "name": "Sorveteria Supreme",
   "icons": [
@@ -6,19 +7,53 @@
       "src": "/icon-192.png",
       "type": "image/png",
       "sizes": "192x192",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "maskable"
     },
     {
       "src": "/icon-512.png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180",
+      "purpose": "any"
     }
   ],
   "start_url": "/",
-  "background_color": "#FDF2F8",
-  "theme_color": "#E11D48",
+  "background_color": "#FFFBFB",
+  "theme_color": "#ED2024",
   "display": "standalone",
   "orientation": "portrait",
-  "description": "App de pedidos online e delivery para a Sorveteria Supreme de Sorocaba/SP. Faça seu açaí ou peça sorvetes artesanais com agilidade e rastreamento em tempo real."
+  "description": "App de pedidos online e delivery para a Sorveteria Supreme de Monte Mor/SP. Faça seu açaí ou peça sorvetes artesanais com agilidade e rastreamento em tempo real.",
+  "screenshots": [
+    {
+      "src": "/assets/images/screenshot_mobile.jpg",
+      "sizes": "768x1376",
+      "type": "image/jpeg",
+      "form_factor": "narrow",
+      "label": "Cardápio Interativo no Celular"
+    },
+    {
+      "src": "/assets/images/screenshot_desktop.jpg",
+      "sizes": "1376x768",
+      "type": "image/jpeg",
+      "form_factor": "wide",
+      "label": "Acompanhamento e Finalização do Pedido no Computador"
+    }
+  ]
 }

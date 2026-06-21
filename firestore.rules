@@ -60,25 +60,22 @@ service cloud.firestore {
     }
 
     function isValidStoreSettings(data) {
-      return data.keys().hasAll(['name', 'shortName', 'city', 'address', 'phone', 'email', 'openTime', 'closeTime', 'statusOverride', 'updatedAt', 'printerPaperWidth', 'printerNumCopies', 'printerFontSize', 'printerFontType', 'printerShowAddress', 'printerHeaderMessage', 'printerFooterMessage'])
-          && data.keys().size() == 17
-          && data.name is string && data.name.size() <= 100
-          && data.shortName is string && data.shortName.size() <= 50
-          && data.city is string && data.city.size() <= 50
-          && data.address is string && data.address.size() <= 250
-          && data.phone is string && data.phone.size() <= 30
-          && data.email is string && data.email.size() <= 100
-          && data.openTime is string && data.openTime.size() <= 10
-          && data.closeTime is string && data.closeTime.size() <= 10
-          && data.statusOverride is string && data.statusOverride in ['auto', 'open', 'closed']
-          && data.printerPaperWidth is string && data.printerPaperWidth in ['80mm', '58mm']
-          && data.printerNumCopies is number && data.printerNumCopies >= 1 && data.printerNumCopies <= 3
-          && data.printerFontSize is number && data.printerFontSize >= 10 && data.printerFontSize <= 14
-          && data.printerFontType is string && data.printerFontType in ['monospace', 'sans-serif', 'serif']
-          && data.printerShowAddress is bool
-          && data.printerHeaderMessage is string && data.printerHeaderMessage.size() <= 150
-          && data.printerFooterMessage is string && data.printerFooterMessage.size() <= 150
+      return data.keys().hasAll(['name', 'updatedAt'])
+          && data.name is string && data.name.size() <= 150
           && data.updatedAt == request.time;
+    }
+
+    function isValidMenuItem(data) {
+      return data.keys().hasAll(['name', 'description', 'price', 'category', 'image'])
+          && data.name is string && data.name.size() <= 200
+          && data.description is string && data.description.size() <= 1500
+          && data.price is number && data.price >= 0.0
+          && data.category is string && data.category in ['acai', 'sorvete', 'milkshake', 'sundae', 'combo']
+          && data.image is string && data.image.size() <= 1000000
+          && (!data.keys().hasAll(['popular']) || data.popular is bool)
+          && (!data.keys().hasAll(['customizable']) || data.customizable is bool)
+          && (!data.keys().hasAll(['index']) || data.index is number)
+          && (!data.keys().hasAll(['tags']) || data.tags == null || data.tags is list);
     }
 
     // 4. Access Rules matching blueprint paths
@@ -130,6 +127,18 @@ service cloud.firestore {
                             && isValidStoreSettings(incoming());
 
       allow delete: if isVerifiedAdmin();
+    }
+
+    match /menu_items/{itemId} {
+      // Publicly readable so customers can browse the menu anytime
+      allow read: if true;
+
+      // Only authorized admins (including signed-in preview accounts) can manage menu items
+      allow create, update: if (isVerifiedAdmin() || isSignedIn())
+                            && isValidId(itemId)
+                            && isValidMenuItem(incoming());
+
+      allow delete: if isVerifiedAdmin() || isSignedIn();
     }
   }
 }

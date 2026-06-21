@@ -1,0 +1,105 @@
+<svg
+  width="500"
+  height="500"
+  viewBox="0 0 500 500"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <defs>
+    <filter id="logoShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="6" floodColor="#000" floodOpacity="0.25" />
+    </filter>
+    <filter id="ribbonShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" floodColor="#000" floodOpacity="0.3" />
+    </filter>
+  </defs>
+
+  <g filter="url(#logoShadow)">
+    <circle cx="250" cy="250" r="190" fill="#FFFFFF" />
+    <circle cx="250" cy="250" r="193" stroke="#ED2024" stroke-width="12" fill="none" />
+    <circle cx="250" cy="250" r="177" stroke="#111111" stroke-width="3" fill="none" />
+
+    <g stroke="#111111" stroke-width="2.5" fill="none" stroke-linecap="round">
+      <path d="M 250,96 Q 256,112 266,110 M 250,96 Q 244,112 234,110" />
+      <path d="M 250,111 C 259,103 268,111 278,110 C 263,115 255,111 250,115 C 245,111 237,115 222,110 C 232,111 241,103 250,111" fill="#111111" />
+      <circle cx="250" cy="95" r="2.5" fill="#111111" />
+      <circle cx="230" cy="110" r="1.5" fill="#111111" />
+      <circle cx="270" cy="110" r="1.5" fill="#111111" />
+    </g>
+
+    <text
+      x="250"
+      y="180"
+      font-family="'Inter', 'Space Grotesk', 'Montserrat', sans-serif"
+      font-size="34"
+      font-weight="900"
+      fill="#111111"
+      text-anchor="middle"
+      letter-spacing="2.5"
+    >
+      SORVETERIA
+    </text>
+    <text
+      x="250"
+      y="218"
+      font-family="'Inter', 'Space Grotesk', 'Montserrat', sans-serif"
+      font-size="22"
+      font-weight="900"
+      fill="#111111"
+      text-anchor="middle"
+      letter-spacing="4"
+    >
+      GOURMET
+    </text>
+
+    <path
+      d="M 68,266 L 15,266 L 38,293 L 15,319 L 68,319 Z"
+      fill="#D01C1C"
+      stroke="#D01C1C"
+      stroke-width="1"
+      stroke-linejoin="round"
+    />
+    <path d="M 68,319 L 68,335 L 82,319 Z" fill="#7F0E1F" />
+
+    <path
+      d="M 432,266 L 485,266 L 462,293 L 485,319 L 432,319 Z"
+      fill="#D01C1C"
+      stroke="#D01C1C"
+      stroke-width="1"
+      stroke-linejoin="round"
+    />
+    <path d="M 432,319 L 432,335 L 418,319 Z" fill="#7F0E1F" />
+
+    <g filter="url(#ribbonShadow)">
+      <rect
+        x="64"
+        y="254"
+        width="372"
+        height="65"
+        fill="#ED2024"
+        stroke="#ED2024"
+        stroke-width="1"
+        rx="2"
+      />
+    </g>
+
+    <text
+      x="250"
+      y="302"
+      font-family="'Playfair Display', 'Brush Script MT', 'Georgia', 'Times New Roman', serif"
+      font-size="54"
+      font-weight="900"
+      font-style="italic"
+      fill="#FFFFFF"
+      text-anchor="middle"
+    >
+      Supreme
+    </text>
+
+    <g stroke="#111111" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M 239,374 L 261,374 L 257,388 L 243,388 Z" fill="#111111" stroke="#111111" stroke-width="1" />
+      <path d="M 241,374 C 238,371 238,364 244,362 Q 242,357 247,355 Q 250,348 252,355 Q 257,357 256,362 C 261,364 261,371 258,374 Z" fill="#111111" />
+      <path d="M 245,364 C 248,367 253,367 255,364" stroke="#FFFFFF" stroke-width="1.2" />
+      <path d="M 248,359 C 249,361 251,361 252,359" stroke="#FFFFFF" stroke-width="1.2" />
+    </g>
+  </g>
+</svg>

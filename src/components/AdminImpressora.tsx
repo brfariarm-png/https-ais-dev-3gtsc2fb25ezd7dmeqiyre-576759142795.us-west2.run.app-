@@ -27,6 +27,8 @@ interface AdminImpressoraProps {
   setAutoPrintOnNew: (value: boolean) => void;
   autoPrintOnPrep: boolean;
   setAutoPrintOnPrep: (value: boolean) => void;
+  autoSendWhatsAppStatus: boolean;
+  setAutoSendWhatsAppStatus: (value: boolean) => void;
 }
 
 export default function AdminImpressora({
@@ -39,6 +41,8 @@ export default function AdminImpressora({
   setAutoPrintOnNew,
   autoPrintOnPrep,
   setAutoPrintOnPrep,
+  autoSendWhatsAppStatus,
+  setAutoSendWhatsAppStatus,
 }: AdminImpressoraProps) {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
@@ -356,12 +360,12 @@ export default function AdminImpressora({
                 <Settings className="w-4 h-4" />
               </span>
               <div>
-                <h3 className="font-extrabold text-[12px] uppercase text-slate-800 tracking-wide">Impressão Instantânea Sem Cliques</h3>
-                <p className="text-[10px] text-slate-400 font-medium">Selecione os momentos em que deseja ejetar o cupom automaticamente</p>
+                <h3 className="font-extrabold text-[12px] uppercase text-slate-800 tracking-wide">Impressão & Disparos Automáticos</h3>
+                <p className="text-[10px] text-slate-400 font-medium">Configure ações instantâneas e notificações disparadas automaticamente pelo sistema</p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <label className="flex items-start gap-3 p-4 bg-slate-50 hover:bg-slate-100 rounded-2xl cursor-pointer border border-slate-150 select-none transition-colors">
                 <input 
                   type="checkbox" 
@@ -374,8 +378,8 @@ export default function AdminImpressora({
                 />
                 <div className="space-y-0.5 text-left">
                   <h5 className="font-extrabold text-[11px] uppercase text-slate-800 leading-tight">Imprimir ao Receber ⚡</h5>
-                  <p className="text-[9.5px] text-slate-450 font-semibold leading-normal">
-                    Chama a janela de impressão do sistema imediatamente no navegador na mesma fração de segundo em que o cliente fechar o carrinho.
+                  <p className="text-[9px] text-slate-450 font-semibold leading-normal">
+                    Abre a tela de impressão fisicamente no mesmo instante em que o cliente fecha o pedido do carrinho.
                   </p>
                 </div>
               </label>
@@ -392,8 +396,26 @@ export default function AdminImpressora({
                 />
                 <div className="space-y-0.5 text-left">
                   <h5 className="font-extrabold text-[11px] uppercase text-slate-800 leading-tight">Imprimir ao Preparar 🥣</h5>
-                  <p className="text-[9.5px] text-slate-450 font-semibold leading-normal">
-                    Dispara a impressão automática quando você clicar no botão &ldquo;Iniciar Montagem&rdquo; no Painel Administrativo.
+                  <p className="text-[9px] text-slate-450 font-semibold leading-normal">
+                    Imprime o cupom automaticamente ao clicar no botão de "Iniciar Montagem" no painel de entregas.
+                  </p>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-3 p-4 bg-slate-50 hover:bg-slate-100 rounded-2xl cursor-pointer border border-slate-150 select-none transition-colors">
+                <input 
+                  type="checkbox" 
+                  checked={autoSendWhatsAppStatus} 
+                  onChange={(e) => {
+                    setAutoSendWhatsAppStatus(e.target.checked);
+                    showFeedback(e.target.checked ? "Status de WhatsApp automático ATIVADO! 💬" : "Status manual de WhatsApp reestabelecido");
+                  }}
+                  className="w-5 h-5 !accent-indigo-600 mt-0.5 cursor-pointer rounded"
+                />
+                <div className="space-y-0.5 text-left">
+                  <h5 className="font-extrabold text-[11px] uppercase text-slate-800 leading-tight">Notificar Status Zap 💬</h5>
+                  <p className="text-[9px] text-slate-450 font-semibold leading-normal">
+                    Abre o WhatsApp Web/App com a mensagem de status prontinha toda vez que você avançar o progresso!
                   </p>
                 </div>
               </label>
